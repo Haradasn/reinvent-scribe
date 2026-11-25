@@ -603,5 +603,8 @@ button.rec-open { cursor: pointer; }
 @media (max-width: 800px) { .week-body { flex-direction: column; } .week-detail { flex: 0 1 45%; border-left: 0; border-top: 1px solid var(--border); padding: 12px 4px; } }
 
 /* next up: a label and cyan edge, so it never looks like the purple selection */
-.agenda-row.next-up { flex-direction: column; align-items: stretch; border-left-color: var(--accent2); }
+.agenda-row.next-up, .agenda-row.now-on { flex-direction: column; align-items: stretch; border-left-color: var(--accent2); }
+.agenda-row.now-on { border-left-color: #7ef3c0; }
 .next-label { padding: 5px 10px; font-size: 0.75rem; font-weight: 700; color: #06222c; background: var(--accent2); border-radius: 0 10px 0 0; }
+
+.now-on .next-label { background: #7ef3c0; }

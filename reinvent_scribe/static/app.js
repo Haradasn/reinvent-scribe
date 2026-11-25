@@ -828,10 +828,17 @@ function showTarget() {
   }
 }
 
+// The next start, whatever is on now (several if they start together)
+function upNext() {
+  if (sched.base === undefined) return [];
+  const later = sched.items.filter((i) => evMs(i.date, i.start) > nowMs());
+  return later.filter((i) => i.date === later[0].date && i.start === later[0].start).map((i) => i.key);
+}
+
 function drawAgenda(box, plans) {
   if (!plans.length) return;
   let marked = plans[0].date !== sched.today;
-  const next = sched.base === undefined ? [] : candidates().map((i) => i.key);
+  const next = upNext();
   for (const i of plans) {
     const past = sched.base !== undefined && evMs(i.date, i.end) < nowMs();
     const isToday = i.date === sched.today;
@@ -850,11 +857,11 @@ function drawAgenda(box, plans) {
     row.className = `agenda-row ${["reserved", "favorite"].includes(i.kind) ? i.kind : "personal"}` +
       `${past ? " past" : ""}${live ? " live" : open ? " open" : ""}`;
     const wait = evMs(i.date, i.start) - nowMs();
-    const isNext = next.includes(i.key) && !live;
-    if (isNext) row.classList.add("next-up");
+    const label = live ? "" : open ? "開催中" : next.includes(i.key) ? `次の予定 · ${until(wait)}` : "";
+    if (label) row.classList.add(open ? "now-on" : "next-up");
     row.dataset.key = i.key;
     row.innerHTML =
-      (isNext ? `<div class="next-label">${wait <= 0 ? "開催中" : `次の予定 · ${until(wait)}`}</div>` : "") +
+      (label ? `<div class="next-label">${label}</div>` : "") +
       `<button class="agenda-main"><span class="agenda-time">${escapeHtml(i.start)}<small>${escapeHtml(i.end)}</small></span>` +
       `<span class="agenda-body"><span class="agenda-title">${escapeHtml(i.title)}</span>` +
       (i.venue ? `<span class="agenda-venue">${escapeHtml(i.venue)}</span>` : "") +
