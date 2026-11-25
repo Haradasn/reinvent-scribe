@@ -94,3 +94,23 @@ def test_error_is_reported_and_bad_key_is_not_retried():
     c.settings.llm_fallback_models = "backup"
     assert c.chat([]) is None
     assert c.last_error == "auth" and len(n) == 1
+
+
+def test_cut_off_answer_is_not_used_and_gemini_gets_room_for_thinking():
+    import json
+    bodies = []
+
+    def handler(request):
+        b = json.loads(request.content)
+        bodies.append(b)
+        cut = b["model"] == "gpt-4o-mini"
+        return httpx.Response(200, json={"choices": [{
+            "finish_reason": "length" if cut else "stop",
+            "message": {"content": "half" if cut else "whole"}}]})
+
+    c = client_with(handler)
+    c.settings.llm_base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+    c.settings.llm_fallback_models = "backup"
+    assert c.chat([]) == "whole"
+    assert bodies[0]["max_tokens"] == 8192
+    assert bodies[0]["reasoning_effort"] == "low"

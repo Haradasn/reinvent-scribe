@@ -62,20 +62,28 @@ class LLMClient:
     def _request(self, model, messages, max_tokens):
         """-> (text, error, worth trying another model)"""
         s = self.settings
+        body = {"model": model, "messages": messages, "max_tokens": max_tokens}
+        if "googleapis.com" in s.llm_base_url:
+            # Gemini counts hidden thinking against max_tokens, which would
+            # cut the visible answer short.
+            body.update(max_tokens=max(max_tokens, 8192), reasoning_effort="low")
         try:
             resp = self._client.post(
                 s.llm_base_url.rstrip("/") + "/chat/completions",
                 headers={"Authorization": f"Bearer {s.llm_api_key}"},
-                json={"model": model, "messages": messages,
-                      "max_tokens": max_tokens},
+                json=body,
             )
             if resp.status_code != 200:
                 log.warning("LLM %s returned %d: %s", model, resp.status_code,
-                            resp.text[:200])
+                            resp.text[:700])
                 error = {503: "busy", 429: "rate_limited", 401: "auth",
                          403: "auth"}.get(resp.status_code, "error")
                 return None, error, error != "auth"
-            out = resp.json()["choices"][0]["message"].get("content")
+            choice = resp.json()["choices"][0]
+            if choice.get("finish_reason") == "length":
+                log.warning("LLM %s answer was cut off", model)
+                return None, "error", True  # never pass on half an answer
+            out = choice["message"].get("content")
             return out, "error", True
         except httpx.TimeoutException:
             log.warning("LLM %s timed out", model)

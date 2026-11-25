@@ -540,7 +540,8 @@ function showReport(tab = report.tab) {
   $("tab-md").setAttribute("aria-selected", tab === "md");
   $("report-body").textContent = report[tab];
   $("btn-copy").disabled = !report[tab];
-  $("btn-mail").disabled = !report.md || !state.mailOk;
+  $("btn-mail").textContent = `${tab === "slack" ? "Slack投稿文" : "日報"}をGmailで送信`;
+  $("btn-mail").disabled = !report[tab] || !state.mailOk;
   $("mail-note").textContent = state.mailOk ? "" : ".env に Gmail の設定が必要です(README参照)";
 }
 $("tab-slack").addEventListener("click", () => showReport("slack"));
@@ -592,8 +593,11 @@ $("btn-mail").addEventListener("click", async () => {
   const to = $("f-to").value.trim();
   const note = $("mail-note");
   if (!to) { note.textContent = "宛先を入力してください"; return; }
+  const kind = report.tab === "slack" ? "Slack投稿文" : "日報";
+  // a leading Slack mention means nothing in an email
+  const body = report.tab === "slack" ? report.slack.replace(/^@[^\n]*\n+/, "") : report.md;
   const attach = $("f-attach").checked;
-  if (!confirm(`${to} に ${report.date} の日報を送信しますか?${attach ? "\n(文字起こしを添付)" : ""}`)) return;
+  if (!confirm(`${to} に ${report.date} の「${kind}」を送信しますか?${attach ? "\n(文字起こしを添付)" : ""}`)) return;
   try { localStorage.setItem("mailTo", to); } catch {}
   $("btn-mail").disabled = true;
   note.textContent = "送信中…";
@@ -601,7 +605,7 @@ $("btn-mail").addEventListener("click", async () => {
     const r = await fetch(`/api/daily-report/send?date=${report.date}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, subject: `re:Invent 出張日報 ${report.date}`, body: report.md, attach_transcript: attach }),
+      body: JSON.stringify({ to, subject: `re:Invent 出張日報 ${report.date}`, body, attach_transcript: attach }),
     });
     const d = await r.json();
     note.textContent = r.ok ? `送信しました ✓${d.attachments ? `(添付 ${d.attachments}件)` : ""}` : d.error || "送信に失敗しました";
