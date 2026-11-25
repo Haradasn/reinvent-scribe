@@ -157,6 +157,8 @@ function scrollToLatest(force) {
   if (follow.on) capBox.scrollTop = capBox.scrollHeight;
   showLatestBtn();
 }
+// a warning bar or window resize must not push the newest line out of view
+new ResizeObserver(() => scrollToLatest()).observe(capBox);
 $("btn-latest").addEventListener("click", () => scrollToLatest(true));
 
 function addCaption(ts, text, translating) {
@@ -292,11 +294,43 @@ $("btn-sum-mail").addEventListener("click", async () => {
 $("btn-s-close").addEventListener("click", () => $("sum-modal").close());
 
 /* ---------- enlarge captions ---------- */
-$("btn-wide").addEventListener("click", () => {
-  const on = document.body.classList.toggle("wide-captions");
-  $("btn-wide").textContent = on ? "⤡ 元に戻す" : "⤢ 大きく表示";
-  $("btn-wide").setAttribute("aria-pressed", String(on));
-  scrollToLatest();
+// The live panel moves into a dialog, so recording controls, warnings and
+// captions keep working there and nothing else on the page changes size.
+const livePanel = document.querySelector(".main-panel");
+const panelHome = document.createComment("live panel");
+livePanel.before(panelHome);
+function setFocusView(on) {
+  const top = capBox.scrollTop; // moving a node resets its scroll
+  const btn = $("btn-focus");
+  if (on) {
+    $("focus-modal").appendChild(livePanel);
+    $("focus-modal").showModal();
+  } else {
+    panelHome.after(livePanel);
+  }
+  const label = on ? "拡大を閉じる" : "字幕だけを拡大";
+  btn.setAttribute("aria-label", label);
+  btn.title = label;
+  const wasFollowing = follow.on;
+  const place = () => {
+    capBox.style.scrollBehavior = "auto";
+    capBox.scrollTop = wasFollowing ? capBox.scrollHeight : top;
+    capBox.style.scrollBehavior = "";
+    follow.on = wasFollowing; // the jump is not the reader scrolling back
+    follow.last = capBox.scrollTop;
+    showLatestBtn();
+  };
+  place();
+  requestAnimationFrame(() => requestAnimationFrame(place)); // after layout
+  btn.focus();
+}
+$("btn-focus").addEventListener("click", () => {
+  if ($("focus-modal").open) $("focus-modal").close();
+  else setFocusView(true);
+});
+$("focus-modal").addEventListener("close", () => setFocusView(false)); // also Esc
+$("focus-modal").addEventListener("click", (e) => {
+  if (e.target === $("focus-modal")) $("focus-modal").close();
 });
 
 let openCard = null;
@@ -717,21 +751,37 @@ function showReport(tab = report.tab) {
 $("tab-slack").addEventListener("click", () => showReport("slack"));
 $("tab-md").addEventListener("click", () => showReport("md"));
 
+function reportState(message = "") {
+  const done = !!report.md;
+  const b = $("btn-regen");
+  $("report-result").classList.toggle("hidden", !done);
+  b.disabled = false;
+  b.textContent = done ? "作り直す" : "日報を作成";
+  // one main action at a time: make it first, then copy it
+  b.className = done ? "ghost-btn" : "primary-btn";
+  $("report-status").textContent = message;
+  if (done) showReport();
+}
+
 $("btn-report").addEventListener("click", () => {
-  report.slack = report.md = "";
-  showReport("slack");
-  $("report-body").textContent = "上司のメンションを入力して「生成する」を押してください";
+  const date = $("list-date").value || today();
+  // reopening the same day keeps what was made
+  if (report.date !== date && !report.busy) report.slack = report.md = "";
+  $("report-title").textContent = `出張日報 ${date.replaceAll("-", "/")}`;
+  if (!report.busy) reportState();
   $("report-modal").showModal();
 });
 $("btn-regen").addEventListener("click", async () => {
   const mention = $("f-mention").value.trim();
   try { localStorage.setItem("mention", mention); } catch {}
-  $("btn-regen").disabled = true;
-  $("btn-copy").disabled = true;
-  $("btn-mail").disabled = true;
-  report.slack = report.md = "";
   const date = $("list-date").value || today();
-  $("report-body").textContent = "生成中…";
+  const b = $("btn-regen");
+  report.busy = true;
+  b.disabled = true;
+  b.textContent = "作成中…";
+  for (const id of ["btn-copy", "btn-mail"]) $(id).disabled = true;
+  $("report-status").textContent = "録音を読んで日報を作っています。録音が多いと1分ほどかかります";
+  let message = "";
   try {
     const r = await fetch(`/api/daily-report?date=${date}`, {
       method: "POST",
@@ -744,11 +794,12 @@ $("btn-regen").addEventListener("click", async () => {
     report.md = data.markdown;
     report.date = date;
     loadMailPhotos(date);
-    showReport();
   } catch {
-    $("report-body").textContent = "生成に失敗しました";
+    message = report.md ? "作り直せませんでした。前の内容を表示しています" : "作成できませんでした。もう一度お試しください";
   }
-  $("btn-regen").disabled = false;
+  report.busy = false;
+  $("mail-note").textContent = "";
+  reportState(message);
 });
 $("btn-copy").addEventListener("click", async () => {
   try {

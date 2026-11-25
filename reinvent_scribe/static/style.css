@@ -389,12 +389,38 @@ a.memo-btn { color: var(--accent2); opacity: 0.9; text-decoration: none; font-si
 .caption-large .view-text { max-height: none; font-size: 1rem; }
 .caption-large.near { font-size: 1rem; border-top: 1px solid var(--border); padding-top: 12px; }
 .caption-large.near .jp-line { font-size: 1rem; }
-.wide-captions .layout { grid-template-columns: 1fr; }
-.wide-captions .layout > * { grid-column: 1 / -1; }
-.wide-captions .captions { height: 68vh; }
-.wide-captions .caption { font-size: 1.2rem; }
-.wide-captions .jp-line { font-size: 1.15rem; }
-.wide-captions .photo-btn img { max-height: 56vh; }
 .modal .check input { width: auto; margin: 0; }
 .modal .check { display: flex; gap: 8px; align-items: center; }
 #s-note { margin-right: auto; color: var(--muted); font-size: 0.8rem; align-self: center; }
+
+/* ---- captions on their own ---- */
+.captions-head, .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.captions-head h2 { font-size: 0.85rem; color: var(--muted); font-weight: 600; letter-spacing: 0.08em; }
+.modal-head h2 { margin: 0; }
+.icon-btn { width: 44px; height: 44px; flex: 0 0 44px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 12px; background: none; color: var(--muted); cursor: pointer; transition: color 0.2s, border-color 0.2s; }
+.icon-btn:hover { color: var(--text); border-color: var(--border); }
+.icon-btn:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+.icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn .i-close, .focus-modal .icon-btn .i-open { display: none; }
+.focus-modal .icon-btn .i-close { display: block; }
+.focus-modal { width: min(1200px, 96vw); height: 94vh; max-width: none; max-height: none; margin: auto; padding: 0; border: 0; background: none; color: var(--text); }
+.focus-modal::backdrop { background: rgba(5, 7, 15, 0.8); backdrop-filter: blur(6px); }
+.focus-modal[open] { animation: focus-in 0.2s ease-out; }
+@keyframes focus-in { from { opacity: 0; transform: scale(0.98); } }
+.focus-modal .main-panel { height: 100%; display: flex; flex-direction: column; background: rgba(20, 26, 51, 0.96); }
+.focus-modal .captions { flex: 1; height: auto; min-height: 0; }
+.focus-modal .caption { font-size: 1.3rem; line-height: 1.7; }
+.focus-modal .jp-line { font-size: 1.25rem; }
+.focus-modal .photo-btn img { max-height: 56vh; }
+
+/* ---- daily report: make, check, then send ---- */
+.report-make { display: flex; align-items: flex-end; gap: 12px; margin-top: 12px; }
+.modal .report-make label { flex: 1; margin: 0; }
+.report-make button { min-height: 44px; white-space: nowrap; }
+.report-status { min-height: 1.4em; margin: 8px 0; color: var(--muted); font-size: 0.82rem; }
+.report-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.report-bar .tabs { margin: 0; }
+#report-modal .report-body { max-height: 38vh; }
+.mail-details > summary { cursor: pointer; padding: 10px 0; font-size: 0.88rem; }
+@media (max-width: 600px) { .report-make { flex-direction: column; align-items: stretch; } }
+@media (prefers-reduced-motion: reduce) { .focus-modal[open] { animation: none; } }

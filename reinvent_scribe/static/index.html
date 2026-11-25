@@ -44,11 +44,17 @@
     </div>
 
     <div id="level-warning" class="level-warning hidden" role="alert"></div>
+    <div class="captions-head">
+      <h2>リアルタイム字幕</h2>
+      <button id="btn-focus" class="icon-btn" aria-label="字幕だけを拡大" title="字幕だけを拡大">
+        <svg class="i-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/></svg>
+        <svg class="i-close" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
     <div id="captions" class="captions">
       <div class="captions-empty">録音を開始すると、ここに英語字幕が流れます</div>
     </div>
     <div class="panel-foot">
-      <button id="btn-wide" class="ghost-btn" aria-pressed="false">⤢ 大きく表示</button>
       <button id="btn-latest" class="latest-btn hidden">↓ 最新の字幕へ</button>
       <button id="btn-clear" class="ghost-btn hidden">画面をクリア(データは保存済み)</button>
     </div>
@@ -94,6 +100,9 @@
   </section>
 </main>
 
+<!-- Captions on their own; the live panel itself is moved in and out -->
+<dialog id="focus-modal" class="focus-modal" aria-label="リアルタイム字幕(拡大)"></dialog>
+
 <!-- Start modal -->
 <dialog id="start-modal" class="modal glass">
   <h2>予定外の録音</h2>
@@ -109,26 +118,38 @@
 </dialog>
 
 <!-- Report modal -->
-<dialog id="report-modal" class="modal glass wide">
-  <h2>出張日報</h2>
-  <label>上司のメンション <input id="f-mention" placeholder="@山田太郎" autocomplete="off"></label>
-  <div class="tabs" role="tablist">
-    <button id="tab-slack" class="ghost-btn" role="tab">Slack投稿文</button>
-    <button id="tab-md" class="ghost-btn" role="tab">日報(Markdown)</button>
+<dialog id="report-modal" class="modal glass wide" aria-labelledby="report-title">
+  <div class="modal-head">
+    <h2 id="report-title">出張日報</h2>
+    <button id="btn-report-close" class="icon-btn" aria-label="閉じる" title="閉じる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </div>
-  <pre id="report-body" class="report-body"></pre>
-  <div class="mail-box">
-    <label>メール宛先 <input id="f-to" type="email" multiple placeholder="manager@example.com" autocomplete="off"></label>
-    <label class="check"><input id="f-attach" type="checkbox"> 文字起こし(英語+日本語訳、テキスト)を添付</label>
-    <details id="mail-photos" class="mail-photos"><summary>写真を添付(<span id="mail-photo-count">0</span>枚選択)</summary><div id="mail-photo-grid" class="photo-grid"></div></details>
-    <button id="btn-mail" class="primary-btn">Gmailで送信</button>
-    <span id="mail-note" role="status"></span>
-  </div>
-  <div class="modal-actions">
-    <button id="btn-regen" class="ghost-btn">生成する</button>
-    <button id="btn-copy" class="primary-btn">コピー</button>
-    <button id="btn-report-close" class="ghost-btn">閉じる</button>
-  </div>
+
+  <section class="report-make">
+    <label>上司のメンション(任意) <input id="f-mention" placeholder="@山田太郎" autocomplete="off"></label>
+    <button id="btn-regen" class="primary-btn">日報を作成</button>
+  </section>
+  <p id="report-status" class="report-status" role="status"></p>
+
+  <section id="report-result" class="hidden">
+    <div class="report-bar">
+      <div class="tabs" role="tablist" aria-label="日報の形式">
+        <button id="tab-slack" class="ghost-btn" role="tab" aria-controls="report-body">Slack投稿文</button>
+        <button id="tab-md" class="ghost-btn" role="tab" aria-controls="report-body">日報(Markdown)</button>
+      </div>
+      <button id="btn-copy" class="primary-btn">コピー</button>
+    </div>
+    <pre id="report-body" class="report-body" tabindex="0"></pre>
+    <details id="mail-box" class="mail-details">
+      <summary>メールで送る</summary>
+      <div class="mail-box">
+        <label>メール宛先 <input id="f-to" type="email" multiple placeholder="manager@example.com" autocomplete="off"></label>
+        <label class="check"><input id="f-attach" type="checkbox"> 文字起こし(英語+日本語訳、テキスト)を添付</label>
+        <details id="mail-photos" class="mail-photos"><summary>写真を添付(<span id="mail-photo-count">0</span>枚選択)</summary><div id="mail-photo-grid" class="photo-grid"></div></details>
+        <button id="btn-mail" class="primary-btn">Gmailで送信</button>
+        <span id="mail-note" role="status"></span>
+      </div>
+    </details>
+  </section>
 </dialog>
 
 <!-- Photo import -->
