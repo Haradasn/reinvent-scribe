@@ -124,7 +124,8 @@ function connectWS() {
     if (msg.type === "segment") { clearPartial(); addCaption(msg.ts, msg.text, msg.translating); }
     if (msg.type === "partial") showPartial(msg.text);
     if (msg.type === "jp") addJapanese(msg.ts, msg.text);
-    if (msg.type === "stt_fallback") { clearPartial(); addSummaryNote("ストリーミング接続が切れたため、ローカル文字起こしに切り替えました"); }
+    if (msg.type === "stt_fallback") { clearPartial(); addSummaryNote("通信が切れたため、ローカル字幕に切り替えました(復旧すると自動で戻ります)"); refreshStatus(); }
+    if (msg.type === "stt_restored") { clearPartial(); addSummaryNote("オンライン字幕に戻りました"); refreshStatus(); }
     if (msg.type === "summary" && (!msg.dirname || msg.dirname === state.current?.dirname)) addSummary(msg.text);
     if (msg.type === "hq_done") loadSessions();
   };

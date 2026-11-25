@@ -6,6 +6,7 @@ import shutil
 import smtplib
 import threading
 import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -33,6 +34,7 @@ log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 SCHEDULE_CSV = Path("sessions.csv")
 GLOSSARY = Path("glossary.txt")
+RECONNECT_SEC = 10
 END_UTTERANCE = object()  # queue marker: finalize captions on pause
 
 
@@ -214,7 +216,9 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                         return
                     ts, text, tries = item
                     if not _translate(ts, text, last=tries >= 4) and tries < 4:
-                        retry.append((ts, text, tries + 1))
+                        # an outage is not the caption's fault: keep it waiting
+                        offline = getattr(llm, "last_error", None) == "network"
+                        retry.append((ts, text, tries + (not offline)))
 
             def _previous(text) -> str:
                 i = recent.index(text) if text in recent else 0
@@ -228,7 +232,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                                      "すでに日本語ならそのまま返すこと。"
                                      "訳文のみを返すこと。"
                                      "発言は文の途中で始まったり切れたりする。原文にない内容で"
-                                     "補わず、切れた所までを訳すこと。"
+                                     "補わず、切れた所までを訳すこと。固有名詞と技術用語以外は日本語にする。"
                                      + _previous(text) + "\n\n## 訳す発言\n" + text}],
                                    max_tokens=1000)
                     if out:
@@ -273,29 +277,92 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                     broadcast({"type": "summary", "text": out,
                                "dirname": session.dir.name})
 
-            engine = {"transcriber": None, "streamer": None}
-            fed = {"samples": 0, "local_from": 0.0}
+            engine = {"transcriber": None, "streamer": None, "pending": None}
+            # positions in the recorded audio, in samples
+            pos = {"fed": 0, "local_fed": 0, "local_from": 0.0}
+            unconfirmed: deque = deque()  # (start, frames) not in captions yet
+            stopping = threading.Event()
 
             def _local_transcriber():
                 if engine["transcriber"] is None:
-                    # it counts from zero even when it takes over midway
-                    fed["local_from"] = fed["samples"] / 16000
                     engine["transcriber"] = transcriber_factory(
                         model_name=model, initial_prompt=glossary_prompt,
-                        on_segment=lambda ts, t: on_segment(ts + fed["local_from"], t))
+                        on_segment=lambda ts, t: on_segment(ts + pos["local_from"], t))
                 return engine["transcriber"]
+
+            def _open_stream():
+                base = {"sec": 0.0}
+                streamer = streamer_factory(
+                    on_segment=lambda ts, t: on_segment(ts + base["sec"], t),
+                    on_partial=lambda t: broadcast({"type": "partial", "text": t}))
+                streamer.start()
+                return streamer, base
+
+            def _use_stream(streamer, base) -> None:
+                base["sec"] = pos["fed"] / 16000
+                engine["base"] = base["sec"]
+                engine["streamer"] = streamer
+                unconfirmed.clear()
+
+            def _feed_local(start: int, frames) -> None:
+                # the transcriber keeps its own clock across takeovers
+                if pos.get("local_next") != start:
+                    if engine["transcriber"] is not None:
+                        engine["transcriber"].flush()
+                    _local_transcriber()
+                    pos["local_from"] = (start - pos["local_fed"]) / 16000
+                _local_transcriber().feed(frames.astype(np.float32) / 32768.0)
+                pos["local_fed"] += len(frames)
+                pos["local_next"] = start + len(frames)
+
+            def _reconnect() -> None:
+                while not stopping.wait(RECONNECT_SEC):
+                    if rec_ref and rec_ref[0].paused:
+                        continue
+                    try:
+                        fresh = _open_stream()
+                    except Exception:
+                        continue
+                    with lock:
+                        if not stopping.is_set():
+                            engine["pending"] = fresh
+                            return
+                    fresh[0].stop()
+                    return
+
+            rec_ref: list = []
+
+            def _start_reconnect() -> None:
+                if not stopping.is_set():
+                    threading.Thread(target=_reconnect, daemon=True,
+                                     name="stt-reconnect").start()
+
+            def _to_local() -> None:
+                dead, engine["streamer"] = engine["streamer"], None
+                done = engine["base"] + getattr(dead, "confirmed_sec", 0.0)
+                threading.Thread(target=lambda: _quiet(dead.stop), daemon=True).start()
+                broadcast({"type": "stt_fallback"})
+                _start_reconnect()
+                # what was sent but never came back as a caption
+                for start, old in list(unconfirmed):
+                    if (start + len(old)) / 16000 > done:
+                        _feed_local(start, old)
+                unconfirmed.clear()
+
+            def _quiet(fn) -> None:
+                try:
+                    fn()
+                except Exception:
+                    log.info("closing a dead stream failed", exc_info=True)
 
             if streamer_factory is not None:
                 try:
-                    streamer = streamer_factory(
-                        on_segment=on_segment,
-                        on_partial=lambda t: broadcast({"type": "partial", "text": t}))
-                    streamer.start()
-                    engine["streamer"] = streamer
+                    _use_stream(*_open_stream())
                     log.info("using streaming STT (AssemblyAI)")
                 except Exception:
                     log.warning("streaming STT unavailable; using local whisper",
                                 exc_info=True)
+                    _start_reconnect()
             if engine["streamer"] is None:
                 _local_transcriber()
 
@@ -333,22 +400,31 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                             log.warning("could not finalize utterance", exc_info=True)
                         continue
                     try:
-                        if engine["streamer"] is not None:
-                            try:
-                                engine["streamer"].feed(frames)
-                                fed["samples"] += len(frames)
-                                continue
-                            except Exception:
-                                log.warning("stream feed failed; falling back "
-                                            "to local whisper", exc_info=True)
-                                dead, engine["streamer"] = engine["streamer"], None
-                                try:
-                                    dead.stop()
-                                except Exception:
-                                    log.exception("streamer close failed")
-                                broadcast({"type": "stt_fallback"})
-                        _local_transcriber().feed(
-                            frames.astype(np.float32) / 32768.0)
+                        start = pos["fed"]
+                        if engine["pending"] is not None:
+                            fresh, engine["pending"] = engine["pending"], None
+                            if engine["transcriber"] is not None:
+                                engine["transcriber"].flush()
+                            _use_stream(*fresh)
+                            log.info("streaming STT restored")
+                            broadcast({"type": "stt_restored"})
+                        pos["fed"] += len(frames)
+                        if engine["streamer"] is None:
+                            _feed_local(start, frames)
+                            continue
+                        unconfirmed.append((start, frames))
+                        done = (engine["base"] + getattr(
+                            engine["streamer"], "confirmed_sec", 0.0)) * 16000
+                        while unconfirmed and (
+                                unconfirmed[0][0] + len(unconfirmed[0][1]) <= done
+                                or start - unconfirmed[0][0] > 16000 * 120):
+                            unconfirmed.popleft()
+                        try:
+                            engine["streamer"].feed(frames)
+                        except Exception:
+                            log.warning("stream lost; falling back to local whisper",
+                                        exc_info=True)
+                            _to_local()
                     except Exception:
                         log.exception("transcription failed; continuing")
 
@@ -361,6 +437,10 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 log.exception("mic start failed")
                 state["mic_ok"] = False
                 wav.close()
+                stopping.set()
+                for part in (engine["streamer"], (engine["pending"] or [None])[0]):
+                    if part is not None:  # billed while open
+                        _quiet(part.stop)
                 shutil.rmtree(session.dir, ignore_errors=True)
                 return JSONResponse(
                     {"error": "マイクが見つかりません。入力デバイスを確認してください。"},
@@ -371,6 +451,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             rec = Recording(session, mic, engine, wav,
                             summarizer, frame_queue, worker)
             rec.jp_queue, rec.jp_worker = jp_queue, jp_worker
+            rec.stopping = stopping
+            rec_ref.append(rec)
             state["recording"] = rec
             date = session.meta["started_at"][:10]
             return {"dirname": session.dir.name, "date": date,
@@ -389,6 +471,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             if rec is None:
                 return JSONResponse({"error": "not recording"}, status_code=409)
             state["recording"] = None
+            rec.stopping.set()
         # Every step runs even if an earlier one fails, so the WAV is always
         # closed and the (billed) streaming connection is always released.
         def _step(name, fn):
@@ -404,7 +487,10 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         rec.frame_queue.put(None)
         rec.worker.join(timeout=30)
         # engines first: their final segments still need translating
-        for name, part in list(rec.engine.items()):
+        if rec.engine["pending"] is not None:
+            _step("pending", rec.engine["pending"][0].stop)
+        for name in ("transcriber", "streamer"):
+            part = rec.engine[name]
             if part is not None:
                 _step(name, part.stop)
         if rec.jp_worker is not None:

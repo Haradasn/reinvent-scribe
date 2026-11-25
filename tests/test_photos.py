@@ -165,6 +165,7 @@ def test_local_takeover_keeps_audio_time(tmp_path):
         def feed(self, pcm):
             self.n += 1
             if self.n > 1: raise ConnectionError
+            self.confirmed_sec = 5.0
         def stop(self): pass
 
     class Mic(FakeMic):

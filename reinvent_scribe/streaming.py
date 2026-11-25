@@ -7,7 +7,9 @@ caller can fall back to the local Whisper transcriber.
 """
 import json
 import logging
+import socket
 import threading
+import time
 from typing import Callable
 
 import numpy as np
@@ -28,6 +30,9 @@ class AssemblyAIStreamer:
         self._receiver: threading.Thread | None = None
         self._buf = bytearray()
         self._terminated = threading.Event()
+        self.confirmed_sec = 0.0  # audio up to here is in final captions
+        self._last_ok = time.monotonic()
+        self._stopping = False
         self._split_turn = None  # turn already asked to end
 
     # AAI v3 rejects audio chunks shorter than 50ms; batch to >=80ms
@@ -41,6 +46,41 @@ class AssemblyAIStreamer:
         self._receiver = threading.Thread(target=self._recv_loop, daemon=True,
                                           name="aai-receiver")
         self._receiver.start()
+        self._last_ok = time.monotonic()
+        for fn in (self._ping_loop, self._watchdog):
+            threading.Thread(target=fn, daemon=True, name="aai-watch").start()
+
+    # A vanished network does not fail send(): the OS buffers for a while and
+    # then blocks. So the link is proven by pongs, and cut when they stop.
+    _PING_SEC = 2.0
+    _DEAD_SEC = 8.0
+
+    def _ping_loop(self) -> None:
+        while not self._terminated.is_set() and not self._stopping:
+            try:
+                if self._ws.ping().wait(self._DEAD_SEC):
+                    self._last_ok = time.monotonic()
+            except Exception:
+                return
+            time.sleep(self._PING_SEC)
+
+    def _watchdog(self) -> None:
+        while not self._terminated.is_set() and not self._stopping:
+            if time.monotonic() - self._last_ok > self._DEAD_SEC:
+                log.warning("AssemblyAI not responding; cutting the connection")
+                self._cut()
+                return
+            time.sleep(0.5)
+
+    def _cut(self) -> None:
+        self._terminated.set()
+        try:  # unlike close(), this also frees a send() that is blocked
+            self._ws.socket.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+
+    def alive(self) -> bool:
+        return not self._terminated.is_set()
 
     def _recv_loop(self) -> None:
         try:
@@ -71,6 +111,8 @@ class AssemblyAIStreamer:
             words = msg.get("words") or []
             start_sec = (words[0].get("start", 0) / 1000.0) if words else 0.0
             self.on_segment(start_sec, transcript)
+            if words:
+                self.confirmed_sec = words[-1].get("end", 0) / 1000.0
         else:
             self.on_partial(transcript)
             self._split_long_turn(msg, transcript)
@@ -95,6 +137,8 @@ class AssemblyAIStreamer:
                 log.info("could not split a long turn")
 
     def feed(self, pcm: np.ndarray) -> None:
+        if self._terminated.is_set():
+            raise ConnectionError("stream closed")
         self._buf.extend(np.asarray(pcm, dtype=np.int16).tobytes())
         if len(self._buf) >= self._MIN_SEND_BYTES:
             data, self._buf = bytes(self._buf), bytearray()
@@ -112,8 +156,9 @@ class AssemblyAIStreamer:
         self._ws.send(json.dumps({"type": "ForceEndpoint"}))
 
     def stop(self) -> None:
+        self._stopping = True
         try:
-            if self._ws is not None:
+            if self._ws is not None and not self._terminated.is_set():
                 self._flush_audio()
                 self._ws.send(json.dumps({"type": "Terminate"}))
                 # closing right away would drop the last utterance
@@ -123,6 +168,8 @@ class AssemblyAIStreamer:
         finally:
             if self._ws is not None:
                 try:
+                    if self._terminated.is_set():
+                        self._cut()
                     self._ws.close()
                 except Exception:
                     pass
