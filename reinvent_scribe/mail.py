@@ -67,5 +67,9 @@ def build_message(sender: str, to: str, subject: str, body_md: str,
 
 def send_gmail(address: str, app_password: str, msg: EmailMessage) -> None:
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
-        smtp.login(address, app_password.replace(" ", ""))
+        try:
+            smtp.login(address, app_password.replace(" ", ""))
+        except smtplib.SMTPServerDisconnected as e:
+            # Gmail may hang up on rejected credentials instead of replying 535
+            raise smtplib.SMTPAuthenticationError(535, b"disconnected") from e
         smtp.send_message(msg)

@@ -505,7 +505,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         try:
             mail_sender(settings.gmail_address, settings.gmail_app_password, msg)
         except smtplib.SMTPAuthenticationError:
-            return JSONResponse({"error": "Gmail にログインできません。アプリパスワードを確認してください。"},
+            return JSONResponse({"error": "Gmail にログインできません(未送信)。アドレスとアプリパスワードを確認してください。"},
                                 status_code=502)
         except Exception as e:
             log.warning("mail send failed: %s", type(e).__name__)

@@ -91,3 +91,18 @@ def test_import_schedule(tmp_path, monkeypatch):
         assert len(c.get("/api/schedule").json()["items"]) == 3
         assert post([item()], force=True).json()["total"] == 1
     assert (tmp_path / "sessions.csv.bak").exists()
+
+
+def test_gmail_hangup_during_login_is_an_auth_error(monkeypatch):
+    import pytest
+    from reinvent_scribe import mail
+
+    class Smtp:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def login(self, *a): raise smtplib.SMTPServerDisconnected("closed")
+
+    monkeypatch.setattr(mail.smtplib, "SMTP_SSL", Smtp)
+    with pytest.raises(smtplib.SMTPAuthenticationError):
+        mail.send_gmail("a@example.com", "pw", None)
