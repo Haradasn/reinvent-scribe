@@ -162,3 +162,28 @@ def test_delete_goes_to_trash_and_can_be_restored(tmp_path):
         assert c.delete(f"/api/trash/{date}/nope").status_code == 404
         assert c.delete(f"/api/trash/{date}/{name}").status_code == 200
         assert c.get("/api/trash").json()["items"] == []
+
+
+def test_session_overview_is_kept_and_translated(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "SCHEDULE_CSV", tmp_path / "sessions.csv")
+
+    class LLM(FakeLLM):
+        def chat(self, messages, max_tokens=1000):
+            return "日本語の概要"
+
+    app = server.create_app(settings=Settings(data_dir=tmp_path / "d"), mic_factory=FakeMic,
+                            transcriber_factory=FakeTranscriber,
+                            transcribe_file_fn=fake_transcribe_file, llm=LLM(), model_name="x",
+                            streamer_factory=None, event_now=lambda: datetime(2026, 11, 25))
+    with TestClient(app) as c:
+        d = {"code": "AIM436-R", "abstract": "About agents.", "speakers": ["A B"], "level": "400"}
+        r = c.post("/api/schedule/import", json={"items": [item(details=d), item(title="B")]})
+        assert r.json()["details"] == 1
+        a, b = c.get("/api/schedule").json()["items"]
+        assert a["id"] == "AIM436-R" and a["details"]["speakers"] == ["A B"] and b["details"] is None
+        assert c.post("/api/schedule/translate", params={"key": a["key"]}).json()["abstract_ja"] == "日本語の概要"
+        assert c.post("/api/schedule/translate", params={"key": "no"}).status_code == 404
+        # a later sync that skipped the overview keeps it
+        c.post("/api/schedule/import", json={"items": [item(), item(title="B")]})
+        a = c.get("/api/schedule").json()["items"][0]
+        assert a["id"] == "AIM436-R" and a["details"]["abstract_ja"] == "日本語の概要"

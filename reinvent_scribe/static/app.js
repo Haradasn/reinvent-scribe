@@ -878,14 +878,8 @@ function eventBlock({ i, from, to, col, cols }, lo, scale) {
     (KIND[i.kind] ? `<span class="tag">${KIND[i.kind]}</span>` : "") + statusOf(i) + "</div>" +
     `<div class="ev-title">${escapeHtml(i.title)}</div>` +
     (i.venue ? `<div class="ev-venue">${escapeHtml(i.venue)}</div>` : "");
-  const show = () => {
-    $("week-modal").close();
-    const row = dayBox.querySelector(`.agenda-row[data-key="${CSS.escape(i.key)}"]`);
-    jumpTo(row, 60);
-    pickItem(i);
-    row?.classList.add("flash");
-    setTimeout(() => row?.classList.remove("flash"), 1600);
-  };
+  el.dataset.key = i.key;
+  const show = () => showDetail(i);
   el.onclick = show;
   el.onkeydown = (e) => {
     if (e.target === el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); show(); }
@@ -893,10 +887,56 @@ function eventBlock({ i, from, to, col, cols }, lo, scale) {
   return el;
 }
 
+/* Session overview beside the week grid: press another session to compare */
+function showDetail(i) {
+  for (const e of $("cal-week").querySelectorAll(".cal-event"))
+    e.classList.toggle("selected", e.dataset.key === i.key);
+  const box = $("week-detail");
+  const d = i.details;
+  const facts = d ? [d.code, d.type, d.level, d.topic].filter(Boolean).join(" · ") : "";
+  box.innerHTML =
+    `<div class="wd-when">${escapeHtml(dayLabel(i.date))} ${escapeHtml(i.start)}–${escapeHtml(i.end)}(現地)</div>` +
+    `<h3>${escapeHtml(i.title)}</h3>` +
+    (i.venue ? `<p class="wd-sub">${escapeHtml(i.venue)}</p>` : "") +
+    (facts ? `<p class="wd-sub">${escapeHtml(facts)}</p>` : "") +
+    (d?.speakers?.length ? `<p class="wd-sub">登壇: ${escapeHtml(d.speakers.join("、"))}</p>` : "") +
+    `<div class="wd-text"></div><button class="primary-btn">この予定を一覧で選ぶ</button>`;
+  box.scrollTop = 0;
+  box.classList.add("on");
+  box.querySelector("button").onclick = () => {
+    $("week-modal").close();
+    jumpTo(dayBox.querySelector(`.agenda-row[data-key="${CSS.escape(i.key)}"]`), 60);
+    pickItem(i);
+  };
+  const text = box.querySelector(".wd-text");
+  const part = (title, body) => {
+    const h = document.createElement("h4"), p = document.createElement("p");
+    h.textContent = title;
+    p.textContent = body;
+    text.append(h, p);
+    return p;
+  };
+  if (!d) {
+    text.textContent = i.kind === "personal" ? "自分で追加した予定なので、概要はありません"
+      : "概要はまだありません。左下の「予定を更新」で取り込めます";
+    return;
+  }
+  const ja = part("概要", d.abstract_ja || "日本語に訳しています…");
+  part("原文", d.abstract);
+  if (d.abstract_ja) return;
+  fetch(`/api/schedule/translate?key=${encodeURIComponent(i.key)}`, { method: "POST" })
+    .then(async (r) => {
+      if (!r.ok) throw new Error();
+      ja.textContent = d.abstract_ja = (await r.json()).abstract_ja;
+    })
+    .catch(() => { ja.textContent = "訳せませんでした(原文をご覧ください)"; });
+}
+
 for (const b of document.querySelectorAll("[data-close]"))
   b.addEventListener("click", () => b.closest("dialog").close());
 $("btn-week").addEventListener("click", () => {
   const days = [...new Set(sched.items.map((i) => i.date))];
+  $("week-detail").classList.remove("on");
   drawGrid($("cal-week"), days, 1.35);
   $("week-modal").showModal();
 });
@@ -1496,15 +1536,18 @@ function syncNote(text, done) {
   clearTimeout(syncTimer);
 }
 $("btn-sync").addEventListener("click", () => {
-  syncNote("予定を読み込み中…");
+  syncNote("予定と概要を読み込み中…(初回は1分ほど)");
   syncTimer = setTimeout(() => syncNote("Chrome拡張が必要です(README参照。導入後はこの画面を再読み込み)", true), 1500);
-  window.postMessage({ type: "scribe-sync" }, location.origin);
+  // sessions whose overview is already here need not be opened again
+  const known = sched.items.filter((i) => i.details)
+    .map((i) => `${Number(i.date.slice(5, 7))}/${Number(i.date.slice(8))} ${i.start} ${i.title}`);
+  window.postMessage({ type: "scribe-sync", known }, location.origin);
 });
 window.addEventListener("message", async (ev) => {
   if (ev.source !== window) return;
   if (ev.data?.type === "scribe-sync-ack") {
     clearTimeout(syncTimer);
-    syncTimer = setTimeout(() => syncNote("時間切れです。もう一度お試しください", true), 120000);
+    syncTimer = setTimeout(() => syncNote("時間切れです。もう一度お試しください", true), 240000);
   }
   if (ev.data?.type !== "scribe-sync-result") return;
   if (ev.data.error) return syncNote(ev.data.error, true);
@@ -1517,7 +1560,7 @@ window.addEventListener("message", async (ev) => {
     let r = await send(false), d = await r.json();
     if (d.confirm && confirm(`${d.error}更新しますか?`)) { r = await send(true); d = await r.json(); }
     if (!r.ok) return syncNote(d.error || "更新できませんでした", true);
-    syncNote(`${d.total}件・追加${d.added.length} 変更${d.changed.length} 削除${d.removed.length}`, true);
+    syncNote(`${d.total}件・追加${d.added.length} 変更${d.changed.length} 削除${d.removed.length}・概要${d.details}`, true);
     await refreshSchedule();
     loadSessions();
   } catch {

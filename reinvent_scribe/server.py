@@ -23,7 +23,8 @@ from .audio import LevelMeter, MicStream, WavWriter
 from .config import Settings
 from .mail import build_message, send_gmail
 from .photos import MAX_BYTES, PhotoStore, read_photo, span, suggest
-from .schedule import load_schedule, save_schedule
+from .schedule import (item_key, load_details, load_schedule, save_details,
+                       save_schedule)
 from .llm import LLMClient, transcript_chat
 from .store import SessionStore
 from .summarize import RollingSummarizer, build_daily_report, build_slack_post, summarize_whole
@@ -33,6 +34,7 @@ log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 SCHEDULE_CSV = Path("sessions.csv")
+DETAILS_JSON = "sessions.details.json"  # next to the csv
 GLOSSARY = Path("glossary.txt")
 RECONNECT_SEC = 10
 END_UTTERANCE = object()  # queue marker: finalize captions on pause
@@ -84,6 +86,7 @@ class ScheduleItem(BaseModel):
     title: str
     venue: str = ""
     kind: str = "reserved"
+    details: dict | None = None
 
 
 class ScheduleBody(BaseModel):
@@ -861,6 +864,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
     @app.post("/api/schedule/import")
     def import_schedule(body: ScheduleBody):
         year, items = event_now().year, []
+        details = load_details(_details_path())
         for i in body.items:
             try:
                 begin = datetime.strptime(f"{year}-{i.month}-{i.day} {i.start}", "%Y-%m-%d %H:%M")
@@ -872,11 +876,47 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                                     status_code=422)
             items.append({"date": f"{begin:%Y-%m-%d}", "start": i.start, "end": i.end,
                           "title": i.title, "venue": i.venue, "kind": i.kind})
+            key = item_key(items[-1]["date"], i.start, i.title)
+            if i.details and str(i.details.get("abstract") or "").strip():
+                new = {k: str(i.details.get(k) or "")[:8000]
+                       for k in ("code", "level", "type", "topic", "abstract")}
+                new["speakers"] = [str(x)[:120] for x in (i.details.get("speakers") or [])][:20]
+                if details.get(key, {}).get("abstract") == new["abstract"]:
+                    new["abstract_ja"] = details[key].get("abstract_ja", "")
+                details[key] = new
+            items[-1]["id"] = details.get(key, {}).get("code", "")
         before = len(load_schedule(SCHEDULE_CSV))
         if not items or (len(items) < before / 2 and not body.force):
             return JSONResponse({"error": f"予定が {before} 件から {len(items)} 件に減ります。",
                                  "confirm": bool(items)}, status_code=409)
-        return save_schedule(SCHEDULE_CSV, items)
+        result = save_schedule(SCHEDULE_CSV, items)
+        save_details(_details_path(), details)
+        return {**result, "details": sum(
+            1 for i in load_schedule(SCHEDULE_CSV) if i["key"] in details)}
+
+    def _details_path() -> Path:
+        return Path(SCHEDULE_CSV).with_name(DETAILS_JSON)
+
+    @app.post("/api/schedule/translate")
+    def translate_abstract(key: str):
+        details = load_details(_details_path())
+        d = details.get(key)
+        if d is None:
+            raise HTTPException(status_code=404, detail="no abstract")
+        if not d.get("abstract_ja"):
+            out = llm.chat([{"role": "user", "content":
+                             "次は技術カンファレンスのセッション概要です。自然な日本語に訳してください。"
+                             "サービス名などの固有名詞は英語のまま。訳文のみを返すこと。"
+                             "\n\n" + d["abstract"]}], max_tokens=2000)
+            if not out:
+                return JSONResponse({"error": "訳せませんでした"}, status_code=502)
+            with lock:  # reload: another one may have been saved meanwhile
+                details = load_details(_details_path())
+                if key in details:
+                    details[key]["abstract_ja"] = out.strip()
+                    save_details(_details_path(), details)
+            d["abstract_ja"] = out.strip()
+        return {"abstract_ja": d["abstract_ja"]}
 
     @app.get("/api/sessions/{date}/{dirname}")
     def session_detail(date: str, dirname: str):
@@ -907,9 +947,11 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
     def schedule():
         now = event_now()
         done = {x.meta.get("schedule_key") for x in store.all()}
+        details = load_details(_details_path())
         return {"now": now.isoformat(timespec="seconds"),
                 "today": f"{now:%Y-%m-%d}", "timezone": settings.event_tz,
-                "items": [{**i, "recorded": i["key"] in done}
+                "items": [{**i, "recorded": i["key"] in done,
+                           "details": details.get(i["key"])}
                           for i in load_schedule(SCHEDULE_CSV)]}
 
     @app.websocket("/ws")

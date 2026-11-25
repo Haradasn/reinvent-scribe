@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import logging
 import os
 import re
@@ -35,7 +36,7 @@ def load_schedule(path: Path) -> list[dict]:
             if not title or end <= begin:
                 log.warning("skipping bad schedule row: %s", row)
                 continue
-            key = f"{begin:%Y%m%d%H%M}-" + re.sub(r"\W+", "-", title.lower())[:80]
+            key = item_key(row["date"], row["start"], title)
             if key in seen:
                 continue
             seen.add(key)
@@ -62,7 +63,8 @@ def save_schedule(path: Path, items: list[dict]) -> dict:
     w = csv.DictWriter(buf, FIELDS, lineterminator="\n")
     w.writeheader()
     for i in items:
-        w.writerow({**i, "id": ids.get((i["date"], i["title"]), "")})
+        w.writerow({**{k: v for k, v in i.items() if k in FIELDS},
+                    "id": i.get("id") or ids.get((i["date"], i["title"]), "")})
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(buf.getvalue(), encoding="utf-8")
     new = load_schedule(tmp)
@@ -75,3 +77,22 @@ def save_schedule(path: Path, items: list[dict]) -> dict:
             "added": [b[k]["title"] for k in b if k not in a],
             "removed": [a[k]["title"] for k in a if k not in b],
             "changed": [b[k]["title"] for k in b if k in a and a[k] != b[k]]}
+
+
+def item_key(date: str, start: str, title: str) -> str:
+    begin = datetime.strptime(f"{date} {start}", "%Y-%m-%d %H:%M")
+    return f"{begin:%Y%m%d%H%M}-" + re.sub(r"\W+", "-", title.lower())[:80]
+
+
+def load_details(path: Path) -> dict:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_details(path: Path, details: dict) -> None:
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(details, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, path)

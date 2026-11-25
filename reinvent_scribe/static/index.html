@@ -167,7 +167,10 @@
 <dialog id="week-modal" class="modal glass week-modal" aria-label="週のスケジュール">
   <div class="modal-head"><h2>週のスケジュール</h2>
     <button class="icon-btn" data-close aria-label="閉じる" title="閉じる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-  <div id="cal-week" class="cal-scroll"></div>
+  <div class="week-body">
+    <div id="cal-week" class="cal-scroll"></div>
+    <aside id="week-detail" class="week-detail" aria-live="polite"></aside>
+  </div>
 </dialog>
 
 <!-- Trash -->

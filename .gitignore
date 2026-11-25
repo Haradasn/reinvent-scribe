@@ -9,3 +9,4 @@ data/
 .env
 sessions.csv
 sessions.csv.*
+sessions.details.json*
