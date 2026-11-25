@@ -148,3 +148,22 @@ def test_main_uses_pick_model(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["reinvent-scribe", "--no-browser"])
     m.main()
     assert captured["model"] == "base.en"
+
+
+# --- delete session from UI ---
+
+def test_delete_session(client, tmp_path):
+    r = client.post("/api/sessions", json={"session_id": "DEL1", "title": "t", "memo": ""})
+    dirname, date = r.json()["dirname"], r.json()["date"]
+    client.post("/api/sessions/stop")
+    r2 = client.delete(f"/api/sessions/{date}/{dirname}")
+    assert r2.status_code == 200
+    assert not (tmp_path / date / dirname).exists()
+    assert client.delete(f"/api/sessions/{date}/{dirname}").status_code == 404
+
+
+def test_delete_active_session_409(client):
+    r = client.post("/api/sessions", json={"session_id": "DEL2", "title": "t", "memo": ""})
+    dirname, date = r.json()["dirname"], r.json()["date"]
+    assert client.delete(f"/api/sessions/{date}/{dirname}").status_code == 409
+    client.post("/api/sessions/stop")

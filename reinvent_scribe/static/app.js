@@ -191,8 +191,16 @@ async function loadSessions() {
       `<span class="sid">${escapeHtml(s.meta.id)}</span>` +
       `<span>${escapeHtml(s.meta.title)}</span>` +
       (s.meta.ended_at ? hq : '<span class="hq-wait">録音中</span>') +
-      `<button class="memo-btn" title="メモ編集">✎</button>`;
+      `<button class="memo-btn" title="メモ編集">✎</button>` +
+      `<button class="memo-btn del-btn" title="削除">🗑</button>`;
     li.querySelector(".memo-btn").onclick = () => openMemo(s);
+    li.querySelector(".del-btn").onclick = async () => {
+      if (!confirm(`[${s.meta.id}] ${s.meta.title} を削除しますか?(録音・文字起こしも消えます)`)) return;
+      const date = s.meta.started_at.slice(0, 10);
+      const r = await fetch(`/api/sessions/${date}/${s.dirname}`, { method: "DELETE" });
+      if (!r.ok) alert((await r.json().catch(() => ({}))).error || "削除に失敗しました");
+      loadSessions();
+    };
     li.onclick = (e) => {
       if (e.target.closest(".memo-btn")) return;
       state.selected = { dirname: s.dirname, date: s.meta.started_at.slice(0, 10) };

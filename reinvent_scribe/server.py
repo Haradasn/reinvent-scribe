@@ -209,6 +209,16 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         session.update_memo(body.memo)
         return {"ok": True}
 
+    @app.delete("/api/sessions/{date}/{dirname}")
+    def delete_session(date: str, dirname: str):
+        session = _get_session(date, dirname)
+        rec: Recording | None = state["recording"]
+        if rec is not None and rec.session.dir == session.dir:
+            return JSONResponse({"error": "録音中のセッションは削除できません"},
+                                status_code=409)
+        shutil.rmtree(session.dir)
+        return {"ok": True}
+
     @app.get("/api/sessions")
     def list_sessions(date: str):
         _check_date(date)
