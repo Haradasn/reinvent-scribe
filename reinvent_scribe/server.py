@@ -29,7 +29,7 @@ from .llm import LLMClient, transcript_chat
 from . import setup
 from .store import SessionStore
 from .summarize import RollingSummarizer, build_daily_report, build_slack_post, summarize_whole
-from .transcribe import Transcriber, load_glossary, transcribe_file
+from .transcribe import Transcriber, load_glossary, load_keyterms, transcribe_file
 
 log = logging.getLogger(__name__)
 
@@ -143,7 +143,9 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         def streamer_factory(on_segment, on_partial):
             from .streaming import AssemblyAIStreamer
             return AssemblyAIStreamer(settings.assemblyai_api_key,
-                                      on_segment=on_segment, on_partial=on_partial)
+                                      on_segment=on_segment, on_partial=on_partial,
+                                      speech_model=settings.assemblyai_model,
+                                      keyterms=load_keyterms(GLOSSARY))
     # reports read whole sessions, so they get a longer timeout than captions
     report_llm = llm or LLMClient(settings, timeout=90.0)
     llm = llm or LLMClient(settings)

@@ -1,12 +1,83 @@
-AWS Amazon EC2 S3 Lambda DynamoDB Aurora RDS Redshift SageMaker Bedrock
-EKS ECS Fargate EventBridge CloudFormation CloudWatch CloudTrail CloudFront
-Kinesis Firehose Athena Glue EMR QuickSight OpenSearch ElastiCache MemoryDB
-Step Functions API Gateway AppSync Amplify Cognito IAM KMS Secrets Manager
-GuardDuty Inspector Macie WAF Shield Control Tower Organizations
-Graviton Nitro Trainium Inferentia Outposts Local Zones Wavelength
-VPC Transit Gateway PrivateLink Direct Connect Route 53 Global Accelerator
-SQS SNS MQ MSK Kafka Karpenter Kubernetes Terraform
-CodePipeline CodeBuild CodeDeploy CloudShell CDK CLI
-Q Developer Q Business Nova Titan Anthropic Claude generative AI LLM RAG
-agentic workflows multi-agent inference fine-tuning embeddings vector database
-Werner Vogels Matt Garman Swami Sivasubramanian Peter DeSantis keynote re:Invent
+# 聞き間違えやすい製品名や登壇者名を1行に1つ書きます。# で始まる行は読みません
+# AssemblyAI へは先頭から100個まで、50文字以下の語を送ります
+# 普通の英単語や、AWS のように誰でも聞き取れる語は入れない方が誤変換が減ります
+re:Invent
+Amazon Bedrock
+Bedrock AgentCore
+Amazon Nova
+Amazon Q Developer
+Amazon Q Business
+Kiro
+SageMaker
+SageMaker HyperPod
+Trainium
+Inferentia
+Graviton
+Nitro
+EC2
+S3 Vectors
+Lambda
+DynamoDB
+Aurora DSQL
+Aurora
+RDS
+Redshift
+EKS
+ECS
+Fargate
+Karpenter
+EventBridge
+Step Functions
+API Gateway
+AppSync
+Amplify
+Cognito
+IAM
+KMS
+Secrets Manager
+GuardDuty
+Macie
+Security Hub
+Control Tower
+CloudFormation
+CloudWatch
+CloudTrail
+CloudFront
+CDK
+CloudShell
+CodePipeline
+CodeBuild
+Kinesis
+Firehose
+Athena
+Glue
+EMR
+QuickSight
+OpenSearch
+ElastiCache
+MemoryDB
+Valkey
+SQS
+SNS
+MSK
+Outposts
+Local Zones
+Wavelength
+VPC
+Transit Gateway
+PrivateLink
+Direct Connect
+Route 53
+Global Accelerator
+Anthropic
+Claude
+Titan
+RAG
+agentic
+Model Context Protocol
+MCP
+Strands Agents
+Werner Vogels
+Matt Garman
+Swami Sivasubramanian
+Peter DeSantis

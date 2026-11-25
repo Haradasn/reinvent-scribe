@@ -70,3 +70,26 @@ def test_transcribe_file_returns_segments(tmp_path, monkeypatch):
         w.writeframes(np.zeros(16000, dtype=np.int16).tobytes())
     segs = transcribe_file(wav, model_name="large-v3-turbo", initial_prompt="x")
     assert segs == [(0.0, "High quality."), (4.0, "Second.")]
+
+
+def test_glossary_keeps_multiword_terms_and_skips_comments(tmp_path):
+    from reinvent_scribe.transcribe import load_keyterms
+    path = tmp_path / "glossary.txt"
+    path.write_text("# note\nStep Functions\n\nKarpenter\nKarpenter\n" + "x" * 51 + "\n")
+    assert load_glossary(path) == ("Step Functions, Karpenter, " + "x" * 51, False)
+    assert load_keyterms(path) == ["Step Functions", "Karpenter"]
+
+
+def test_keyterms_capped_at_100(tmp_path):
+    from reinvent_scribe.transcribe import load_keyterms
+    path = tmp_path / "glossary.txt"
+    path.write_text("\n".join(f"T{i}" for i in range(150)))
+    assert load_keyterms(path) == [f"T{i}" for i in range(100)]
+
+
+def test_bundled_glossary_fits_assemblyai():
+    from pathlib import Path
+    from reinvent_scribe.transcribe import _glossary_terms, load_keyterms
+    path = Path(__file__).parent.parent / "glossary.txt"
+    assert load_keyterms(path) == _glossary_terms(path)  # nothing dropped
+    assert load_glossary(path)[1] is False

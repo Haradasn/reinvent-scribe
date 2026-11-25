@@ -45,12 +45,12 @@ re:Invent などの英語セッションを **ローカルで録音+リアルタ
 | 5 Chrome 拡張 | おすすめ | 自分の re:Invent の予定と概要の取り込み |
 | 6 Gmail | 任意 | 日報・要約をメールで送る |
 
-料金の目安(2026年11月): OpenAI は 1 時間 約$0.03〜、AssemblyAI は 1 時間 $0.15〜。使う前に各社の最新の料金を確認してください。
+料金の目安(2026年11月): OpenAI は 1 時間 約$0.03〜、AssemblyAI は 1 時間 約$0.30。使う前に各社の最新の料金を確認してください。
 
 <details><summary>細かい設定(.env を直接編集)</summary>
 
 `SUMMARY_INTERVAL_SEC`(要約の間隔・秒、既定180)、`LLM_FALLBACK_MODELS`(混雑時に試すモデル、カンマ区切り)、
-`EVENT_TZ`(既定 America/Los_Angeles)、`DATA_DIR`(保存先)、`WHISPER_MODEL`(字幕用モデル)
+`ASSEMBLYAI_MODEL`(字幕のモデル、既定 assemblyai-stt-3-7-realtime)、`EVENT_TZ`(既定 America/Los_Angeles)、`DATA_DIR`(保存先)、`WHISPER_MODEL`(字幕用モデル)
 
 </details>
 
@@ -98,11 +98,14 @@ re:Invent 側の画面が変わると読めなくなることがあります。
 - AI での読み取りとメール添付は、押した・選んだ写真だけ。撮影や共有が禁止のスライドに注意
 - 「記事⤓」で文字起こし・要約・写真をまとめた zip を保存し、Claude に渡せます
 
-## glossary.txt(AWS 用語の認識精度向上)
+## glossary.txt の書き方
 
-`glossary.txt` の単語が Whisper の initial_prompt に注入されます。
-自分が聞くセッションの固有名詞に合わせて自由に編集してください。
-**約 170 語(≒224 トークン)を超えた分は使われません**(起動ログに警告が出ます)。
+字幕で聞き間違えやすい製品名や登壇者名を、`glossary.txt` に1行に1つ書きます。`#` で始まる行は読みません。
+書いた語は Whisper(ネット不要の字幕)と AssemblyAI の両方で使い、次の録音から反映します。
+
+- 自分が聞くセッションの製品名・登壇者名に合わせて書き換えてください
+- AssemblyAI へ送るのは先頭から100個までで、51文字以上の語は送りません。Whisper で使うのは約170語までです
+- `AWS` のように普通に聞き取れる語や一般的な英単語は、入れない方が別の語を誤ってその語に書き換えることが減ります
 
 ## データの場所
 

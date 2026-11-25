@@ -279,3 +279,13 @@ def test_failed_translation_is_retried(tmp_path):
                 break
             time.sleep(0.05)
     assert "(JA) こん にちは" in next(tmp_path.glob("*/*/transcript.md")).read_text()
+
+
+def test_stream_url_sets_model_and_keyterms():
+    from urllib.parse import parse_qs, urlparse
+    from reinvent_scribe.streaming import stream_url
+    q = parse_qs(urlparse(stream_url("m", ["Step Functions", "Karpenter"])).query)
+    assert q["speech_model"] == ["m"] and q["sample_rate"] == ["16000"]
+    assert json.loads(q["keyterms_prompt"][0]) == ["Step Functions", "Karpenter"]
+    assert "keyterms_prompt" not in stream_url("m", [])
+    assert "assemblyai-stt-3-7-realtime" in stream_url("")

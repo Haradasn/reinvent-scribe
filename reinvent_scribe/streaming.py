@@ -11,19 +11,34 @@ import socket
 import threading
 import time
 from typing import Callable
+from urllib.parse import urlencode
 
 import numpy as np
 
 log = logging.getLogger(__name__)
 
-_WSS = "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true"
+_WSS = "wss://streaming.assemblyai.com/v3/ws"
+# set explicitly: the service default differs by account and costs more
+DEFAULT_SPEECH_MODEL = "assemblyai-stt-3-7-realtime"
+
+
+def stream_url(speech_model: str = DEFAULT_SPEECH_MODEL,
+               keyterms: list[str] | None = None) -> str:
+    params = {"sample_rate": 16000, "encoding": "pcm_s16le",
+              "speech_model": speech_model or DEFAULT_SPEECH_MODEL}
+    if keyterms:
+        params["keyterms_prompt"] = json.dumps(keyterms)
+    return f"{_WSS}?{urlencode(params)}"
 
 
 class AssemblyAIStreamer:
     def __init__(self, api_key: str,
                  on_segment: Callable[[float, str], None],
-                 on_partial: Callable[[str], None] = lambda t: None):
+                 on_partial: Callable[[str], None] = lambda t: None,
+                 speech_model: str = DEFAULT_SPEECH_MODEL,
+                 keyterms: list[str] | None = None):
         self.api_key = api_key
+        self.url = stream_url(speech_model, keyterms)
         self.on_segment = on_segment
         self.on_partial = on_partial
         self._ws = None
@@ -40,7 +55,7 @@ class AssemblyAIStreamer:
 
     def start(self) -> None:
         from websockets.sync.client import connect
-        self._ws = connect(_WSS,
+        self._ws = connect(self.url,
                            additional_headers={"Authorization": self.api_key},
                            open_timeout=5)
         self._receiver = threading.Thread(target=self._recv_loop, daemon=True,

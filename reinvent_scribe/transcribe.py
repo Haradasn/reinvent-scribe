@@ -11,19 +11,46 @@ log = logging.getLogger(__name__)
 _MAX_PROMPT_WORDS = 170
 
 
-def load_glossary(path: Path) -> tuple[str, bool]:
+def _glossary_terms(path: Path) -> list[str]:
+    """One term per line; blank lines and # comments are skipped."""
     path = Path(path)
     if not path.exists():
-        return "", False
-    words = path.read_text(encoding="utf-8").split()
-    if not words:
-        return "", False
-    truncated = len(words) > _MAX_PROMPT_WORDS
+        return []
+    terms = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and line not in terms:
+            terms.append(line)
+    return terms
+
+
+def load_glossary(path: Path) -> tuple[str, bool]:
+    """Whisper initial_prompt built from glossary.txt."""
+    terms, words, truncated = _glossary_terms(path), 0, False
+    kept = []
+    for t in terms:
+        words += len(t.split())
+        if words > _MAX_PROMPT_WORDS:
+            truncated = True
+            break
+        kept.append(t)
     if truncated:
-        log.warning("glossary.txt exceeds ~224 tokens; using first %d words",
-                    _MAX_PROMPT_WORDS)
-        words = words[:_MAX_PROMPT_WORDS]
-    return ", ".join(words), truncated
+        log.warning("glossary.txt exceeds ~224 tokens; using the first %d terms",
+                    len(kept))
+    return ", ".join(kept), truncated
+
+
+# AssemblyAI keyterms_prompt: more than 100 terms is an error, longer
+# than 50 characters is ignored
+_MAX_KEYTERMS, _MAX_KEYTERM_CHARS = 100, 50
+
+
+def load_keyterms(path: Path) -> list[str]:
+    terms = [t for t in _glossary_terms(path) if len(t) <= _MAX_KEYTERM_CHARS]
+    if len(terms) > _MAX_KEYTERMS:
+        log.warning("glossary.txt has %d terms; AssemblyAI gets the first %d",
+                    len(terms), _MAX_KEYTERMS)
+    return terms[:_MAX_KEYTERMS]
 
 
 _model_cache: dict = {}
