@@ -194,3 +194,14 @@ def test_summary_can_be_rebuilt_with_slides(client):
     while client.get("/api/status").json()["hq_pending"]:
         time.sleep(0.02)
     assert client.post(base + "/resummarize").json() == {"summary": "x"}
+
+
+def test_non_slide_photos_do_not_reach_the_ai_context(tmp_path):
+    s = rec(tmp_path, 1000, 1600)
+    st = PhotoStore(tmp_path, "America/Los_Angeles")
+    p = st.add("a.jpg", image())
+    st.move(p["id"], st.inbox, st.folder(s))
+    st.set_text(p["id"], st.folder(s), "スライドの情報はありません")
+    assert st.slide_text(s) == ""
+    st.set_text(p["id"], st.folder(s), "売上 10%")
+    assert "売上 10%" in st.slide_text(s)

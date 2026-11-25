@@ -27,6 +27,7 @@ except ImportError:  # JPEG/PNG still work
     pass
 
 NEAR_SEC = 600
+NO_SLIDE = "スライドの情報はありません"
 MAX_BYTES = 60 * 1024 * 1024
 _ID = re.compile(r"^[0-9a-f]{16}$")
 _lock = threading.RLock()
@@ -208,7 +209,8 @@ class PhotoStore:
     def slide_text(self, session) -> str:
         from .store import _fmt_ts
         lines = [f"[{_fmt_ts(p['pos'])}] {p['text']}"
-                 for p in self.for_session(session) if p["text"]]
+                 for p in self.for_session(session)
+                 if p["text"] and not p["text"].startswith(NO_SLIDE)]
         return ("\n\n## スライド写真の読み取り(発言ではない)\n" + "\n\n".join(lines)
                 if lines else "")
 
@@ -224,7 +226,7 @@ class PhotoStore:
                 rows.append((int(t[1]) * 3600 + int(t[2]) * 60 + int(t[3]), 0, line))
         for p in photos:
             note = f"[{_fmt_ts(p['pos'])}] ![スライド](photos/{p['id']}.jpg)"
-            if p["text"]:
+            if p["text"] and not p["text"].startswith(NO_SLIDE):
                 note += "\n\n> " + p["text"].replace("\n", "\n> ")
             rows.append((int(p["pos"]), 1, note))
         rows.sort(key=lambda r: r[:2])

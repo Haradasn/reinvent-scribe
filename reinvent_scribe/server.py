@@ -233,7 +233,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                                    max_tokens=1000)
                     if out:
                         # one line: it may be saved after later captions
-                        out = " ".join(out.split("\n")).strip()
+                        out = " ".join(out.split("\n")).replace("】【", "").strip()
                         session.append_segment(ts, "(JA) " + out)
                         broadcast({"type": "jp", "ts": ts, "text": out,
                                    "dirname": session.dir.name})
