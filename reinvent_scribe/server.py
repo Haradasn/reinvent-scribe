@@ -52,6 +52,9 @@ class Recording:
         self.summarizer = summarizer
         self.frame_queue = frame_queue
         self.worker = worker
+        self.paused = False
+        self.jp_queue = None
+        self.jp_worker = None
 
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -278,6 +281,30 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="session not found")
 
+    @app.post("/api/sessions/pause")
+    def pause_session():
+        rec: Recording | None = state["recording"]
+        if rec is None or rec.paused:
+            return JSONResponse({"error": "not recording or already paused"},
+                                status_code=409)
+        rec.mic.stop()
+        rec.paused = True
+        return {"ok": True}
+
+    @app.post("/api/sessions/resume")
+    def resume_session():
+        rec: Recording | None = state["recording"]
+        if rec is None or not rec.paused:
+            return JSONResponse({"error": "not paused"}, status_code=409)
+        try:
+            rec.mic.start()
+        except Exception:
+            log.exception("mic restart failed")
+            return JSONResponse({"error": "マイクの再開に失敗しました"},
+                                status_code=503)
+        rec.paused = False
+        return {"ok": True}
+
     @app.patch("/api/sessions/{date}/{dirname}/memo")
     def patch_memo(date: str, dirname: str, body: MemoBody):
         session = _get_session(date, dirname)
@@ -339,6 +366,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                        "date": rec.session.meta["started_at"][:10],
                        "meta": rec.session.meta}
         return {"recording": rec is not None, "session": session,
+                "paused": rec.paused if rec else False,
                 "mic_ok": state["mic_ok"], "llm_ok": llm.available(),
                 "model": model, "hq_pending": list(state["hq_pending"])}
 

@@ -34,11 +34,14 @@ function syncRecordingState(s) {
     clearInterval(state.timerId);
     state.timerId = setInterval(tick, 1000);
     $("btn-record").classList.add("recording");
+    $("btn-pause").classList.remove("hidden");
     $("rec-title").textContent = `[${s.session.meta.id}] ${s.session.meta.title}`;
   } else if (!s.recording && state.recording) {
     state.recording = false;
+    state.paused = false;
     clearInterval(state.timerId);
     $("btn-record").classList.remove("recording");
+    $("btn-pause").classList.add("hidden");
     $("rec-title").textContent = "待機中";
   }
 }
@@ -219,20 +222,51 @@ async function startRecording(id, title, memo) {
   }
   const data = await r.json();
   state.recording = true;
+  state.paused = false;
   state.current = { dirname: data.dirname, date: data.date };
   state.selected = state.current;
   state.startedAt = Date.now();
   state.timerId = setInterval(tick, 1000);
   $("btn-record").classList.add("recording");
+  $("btn-pause").classList.remove("hidden");
+  $("btn-pause").textContent = "⏸ 一時停止";
   $("rec-title").textContent = `[${id}] ${title}`;
   $("captions").innerHTML = "";
 }
 
+$("btn-pause").addEventListener("click", async () => {
+  if (!state.recording) return;
+  if (!state.paused) {
+    const r = await fetch("/api/sessions/pause", { method: "POST" });
+    if (!r.ok) return;
+    state.paused = true;
+    state.pausedAt = Date.now();
+    clearInterval(state.timerId);
+    $("btn-pause").textContent = "▶ 再開";
+    $("btn-record").classList.remove("recording");
+    $("rec-title").textContent += "(一時停止中)";
+  } else {
+    const r = await fetch("/api/sessions/resume", { method: "POST" });
+    if (!r.ok) {
+      alert("再開に失敗しました");
+      return;
+    }
+    state.paused = false;
+    state.startedAt += Date.now() - state.pausedAt;
+    state.timerId = setInterval(tick, 1000);
+    $("btn-pause").textContent = "⏸ 一時停止";
+    $("btn-record").classList.add("recording");
+    $("rec-title").textContent = $("rec-title").textContent.replace("(一時停止中)", "");
+  }
+});
+
 async function stopRecording() {
   await fetch("/api/sessions/stop", { method: "POST" });
   state.recording = false;
+  state.paused = false;
   clearInterval(state.timerId);
   $("btn-record").classList.remove("recording");
+  $("btn-pause").classList.add("hidden");
   $("rec-title").textContent = "待機中";
   const note = document.createElement("div");
   note.className = "captions-empty";

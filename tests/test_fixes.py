@@ -224,3 +224,24 @@ def test_segments_get_japanese_translation(tmp_path):
             time.sleep(0.05)
         c.post("/api/sessions/stop")
     assert "日本語訳です" in text
+
+
+# --- pause / resume ---
+
+def test_pause_and_resume(client):
+    client.post("/api/sessions", json={"session_id": "P1", "title": "t", "memo": ""})
+    r = client.post("/api/sessions/pause")
+    assert r.status_code == 200
+    st = client.get("/api/status").json()
+    assert st["recording"] is True and st["paused"] is True
+    assert client.post("/api/sessions/pause").status_code == 409  # already paused
+    r2 = client.post("/api/sessions/resume")
+    assert r2.status_code == 200
+    assert client.get("/api/status").json()["paused"] is False
+    assert client.post("/api/sessions/resume").status_code == 409  # not paused
+    client.post("/api/sessions/stop")
+
+
+def test_pause_without_recording_409(client):
+    assert client.post("/api/sessions/pause").status_code == 409
+    assert client.post("/api/sessions/resume").status_code == 409
