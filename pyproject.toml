@@ -17,6 +17,7 @@ dev = ["pytest"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.setuptools]
 packages = ["reinvent_scribe"]
