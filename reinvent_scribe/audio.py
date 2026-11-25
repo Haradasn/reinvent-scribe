@@ -52,6 +52,9 @@ class MicStream:
         self._stream = None
 
     def _callback(self, indata, frames, time_info, status) -> None:
+        if status:
+            import logging
+            logging.getLogger(__name__).warning("audio input status: %s", status)
         self.on_frames(np.asarray(indata).reshape(-1).copy())
 
     def start(self) -> None:

@@ -1,0 +1,150 @@
+"""Tests for final-review fixes."""
+import threading
+import time
+
+import numpy as np
+import pytest
+from fastapi.testclient import TestClient
+
+from reinvent_scribe.config import Settings
+from reinvent_scribe.server import create_app
+from reinvent_scribe.summarize import RollingSummarizer
+
+from tests.test_server import (BrokenMic, FakeLLM, FakeMic, FakeTranscriber,
+                               fake_transcribe_file)
+
+
+# --- Critical 1: transcription must not run on the audio callback thread ---
+
+class ThreadRecordingTranscriber(FakeTranscriber):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        ThreadRecordingTranscriber.feed_thread = None
+        ThreadRecordingTranscriber.fed = threading.Event()
+
+    def feed(self, pcm):
+        ThreadRecordingTranscriber.feed_thread = threading.current_thread()
+        ThreadRecordingTranscriber.fed.set()
+
+
+class CallbackThreadMic(FakeMic):
+    """Calls on_frames from a named thread, like PortAudio does."""
+    def start(self):
+        def run():
+            CallbackThreadMic.cb_thread = threading.current_thread()
+            self.on_frames(np.zeros(1600, dtype=np.int16))
+        t = threading.Thread(target=run, name="audio-callback")
+        t.start()
+        t.join()
+
+
+def test_transcription_runs_off_audio_callback_thread(tmp_path):
+    app = create_app(settings=Settings(data_dir=tmp_path),
+                     mic_factory=CallbackThreadMic,
+                     transcriber_factory=ThreadRecordingTranscriber,
+                     transcribe_file_fn=fake_transcribe_file,
+                     llm=FakeLLM(), model_name="small.en")
+    with TestClient(app) as c:
+        c.post("/api/sessions", json={"session_id": "K", "title": "t", "memo": ""})
+        assert ThreadRecordingTranscriber.fed.wait(3.0)
+        c.post("/api/sessions/stop")
+    assert ThreadRecordingTranscriber.feed_thread is not CallbackThreadMic.cb_thread
+
+
+# --- Important 2: failed mic start must not leave an orphan session ---
+
+def test_failed_mic_start_leaves_no_session(tmp_path):
+    app = create_app(settings=Settings(data_dir=tmp_path),
+                     mic_factory=BrokenMic,
+                     transcriber_factory=FakeTranscriber,
+                     transcribe_file_fn=fake_transcribe_file,
+                     llm=FakeLLM(), model_name="small.en")
+    with TestClient(app) as c:
+        r = c.post("/api/sessions", json={"session_id": "K", "title": "t", "memo": ""})
+        assert r.status_code == 503
+        from datetime import date
+        r2 = c.get(f"/api/sessions?date={date.today().isoformat()}")
+        assert r2.json()["sessions"] == []
+
+
+# --- Important 3: summarizer must not lose segments added during the LLM call ---
+
+class RaceLLM:
+    def __init__(self, summarizer_holder):
+        self.holder = summarizer_holder
+
+    def available(self):
+        return True
+
+    def chat(self, messages, max_tokens=1000):
+        self.holder["rs"].add("late segment")  # arrives mid-call
+        return "summary"
+
+
+def test_summarizer_keeps_segments_added_during_call():
+    holder = {}
+    rs = RollingSummarizer(RaceLLM(holder), interval_sec=1)
+    holder["rs"] = rs
+    rs.add("early")
+    assert rs.summarize() == "summary"
+    assert rs._pending == ["late segment"]
+
+
+class FailingLLM:
+    def available(self):
+        return True
+
+    def chat(self, messages, max_tokens=1000):
+        return None
+
+
+def test_summarizer_requeues_on_failure():
+    rs = RollingSummarizer(FailingLLM(), interval_sec=1)
+    rs.add("text")
+    assert rs.summarize() is None
+    assert "text" in rs._pending  # retried next time
+
+
+# --- Important 5: invalid params return 4xx, not 500 ---
+
+@pytest.fixture
+def client(tmp_path):
+    app = create_app(settings=Settings(data_dir=tmp_path),
+                     mic_factory=FakeMic, transcriber_factory=FakeTranscriber,
+                     transcribe_file_fn=fake_transcribe_file,
+                     llm=FakeLLM(), model_name="small.en")
+    with TestClient(app) as c:
+        yield c
+
+
+def test_missing_session_404(client):
+    r = client.post("/api/sessions/2026-12-01/nope/chat", json={"question": "q"})
+    assert r.status_code == 404
+    r2 = client.patch("/api/sessions/2026-12-01/nope/memo", json={"memo": "m"})
+    assert r2.status_code == 404
+
+
+def test_bad_date_422(client):
+    assert client.post("/api/daily-report?date=../../evil").status_code == 422
+    assert client.get("/api/sessions?date=not-a-date").status_code == 422
+
+
+def test_schedule_bad_now_is_safe(client):
+    r = client.get("/api/schedule?now=garbage")
+    assert r.status_code == 422
+
+
+# --- Important 4: startup wires pick_model fallback ---
+
+def test_main_uses_pick_model(monkeypatch):
+    import reinvent_scribe.__main__ as m
+    import sys
+    captured = {}
+    monkeypatch.setattr("reinvent_scribe.transcribe.pick_model",
+                        lambda preferred: "base.en")
+    monkeypatch.setattr(m, "create_app",
+                        lambda settings, model_name: captured.update(model=model_name))
+    monkeypatch.setattr("uvicorn.run", lambda *a, **kw: None)
+    monkeypatch.setattr(sys, "argv", ["reinvent-scribe", "--no-browser"])
+    m.main()
+    assert captured["model"] == "base.en"

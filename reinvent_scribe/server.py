@@ -1,6 +1,9 @@
 import asyncio
 import csv
 import logging
+import queue
+import re
+import shutil
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -40,12 +43,24 @@ class ChatBody(BaseModel):
 
 
 class Recording:
-    def __init__(self, session, mic, transcriber, wav, summarizer):
+    def __init__(self, session, mic, transcriber, wav, summarizer,
+                 frame_queue, worker):
         self.session = session
         self.mic = mic
         self.transcriber = transcriber
         self.wav = wav
         self.summarizer = summarizer
+        self.frame_queue = frame_queue
+        self.worker = worker
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _check_date(date: str) -> None:
+    if not _DATE_RE.match(date):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="invalid date")
 
 
 def create_app(settings: Settings | None = None, mic_factory=MicStream,
@@ -103,13 +118,30 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 model_name=model, initial_prompt=glossary_prompt,
                 on_segment=on_segment)
 
+            # The audio callback must stay fast: it only writes the WAV and
+            # enqueues PCM. Whisper inference runs on a dedicated worker
+            # thread so a slow model can never stall capture.
+            frame_queue: queue.Queue = queue.Queue()
+
             def on_frames(frames: np.ndarray) -> None:
                 try:
                     wav.write(frames)
-                    transcriber.feed(frames.astype(np.float32) / 32768.0)
+                    frame_queue.put(frames)
                 except Exception:
                     log.exception("frame handling failed")
 
+            def _worker() -> None:
+                while True:
+                    frames = frame_queue.get()
+                    if frames is None:
+                        return
+                    try:
+                        transcriber.feed(frames.astype(np.float32) / 32768.0)
+                    except Exception:
+                        log.exception("transcription failed; continuing")
+
+            worker = threading.Thread(target=_worker, daemon=True,
+                                      name="transcribe-worker")
             mic = mic_factory(on_frames=on_frames)
             try:
                 mic.start()
@@ -117,11 +149,14 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 log.exception("mic start failed")
                 state["mic_ok"] = False
                 wav.close()
+                shutil.rmtree(session.dir, ignore_errors=True)
                 return JSONResponse(
                     {"error": "マイクが見つかりません。入力デバイスを確認してください。"},
                     status_code=503)
+            worker.start()
             state["mic_ok"] = True
-            state["recording"] = Recording(session, mic, transcriber, wav, summarizer)
+            state["recording"] = Recording(session, mic, transcriber, wav,
+                                           summarizer, frame_queue, worker)
             date = session.meta["started_at"][:10]
             return {"dirname": session.dir.name, "date": date,
                     "meta": session.meta}
@@ -134,6 +169,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 return JSONResponse({"error": "not recording"}, status_code=409)
             state["recording"] = None
         rec.mic.stop()
+        rec.frame_queue.put(None)
+        rec.worker.join(timeout=30)
         rec.transcriber.stop()
         rec.wav.close()
         rec.session.finalize()
@@ -158,14 +195,23 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         threading.Thread(target=_hq, daemon=True).start()
         return {"dirname": rec.session.dir.name}
 
+    def _get_session(date: str, dirname: str):
+        _check_date(date)
+        try:
+            return store.get(date, Path(dirname).name)
+        except FileNotFoundError:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="session not found")
+
     @app.patch("/api/sessions/{date}/{dirname}/memo")
     def patch_memo(date: str, dirname: str, body: MemoBody):
-        session = store.get(date, dirname)
+        session = _get_session(date, dirname)
         session.update_memo(body.memo)
         return {"ok": True}
 
     @app.get("/api/sessions")
     def list_sessions(date: str):
+        _check_date(date)
         sessions = store.list_for_date(date)
         return {"sessions": [
             {"dirname": s.dir.name, "meta": s.meta,
@@ -173,11 +219,11 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
 
     @app.post("/api/sessions/{date}/{dirname}/chat")
     def chat(date: str, dirname: str, body: ChatBody):
+        session = _get_session(date, dirname)
         if not llm.available():
             return JSONResponse(
                 {"error": "LLM が未設定です。LLM_BASE_URL / LLM_API_KEY / LLM_MODEL を設定してください。"},
                 status_code=503)
-        session = store.get(date, dirname)
         hq = session.dir / "transcript_hq.md"
         transcript = hq.read_text(encoding="utf-8") if hq.exists() \
             else session.transcript_text()
@@ -191,6 +237,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
 
     @app.post("/api/daily-report")
     def daily_report(date: str):
+        _check_date(date)
         sessions = store.list_for_date(date)
         md = build_daily_report(sessions, llm)
         day_dir = settings.data_dir / date
@@ -206,7 +253,11 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
 
     @app.get("/api/schedule")
     def schedule(now: str | None = None):
-        ts = datetime.fromisoformat(now) if now else datetime.now()
+        try:
+            ts = datetime.fromisoformat(now) if now else datetime.now()
+        except ValueError:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=422, detail="invalid now")
         suggestions = []
         if SCHEDULE_CSV.exists():
             with open(SCHEDULE_CSV, encoding="utf-8") as f:

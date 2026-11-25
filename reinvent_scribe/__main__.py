@@ -15,7 +15,11 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
-    app = create_app()
+    from .config import Settings
+    from .transcribe import pick_model
+    settings = Settings.from_env()
+    model = pick_model(settings.whisper_model)
+    app = create_app(settings=settings, model_name=model)
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open,
                         args=(f"http://127.0.0.1:{args.port}",)).start()

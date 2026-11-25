@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 
 from .store import Session
@@ -14,20 +15,35 @@ class RollingSummarizer:
         self.interval_sec = interval_sec
         self.current: str = ""
         self._pending: list[str] = []
+        self._lock = threading.Lock()
+        self._running = False
         self._last_run = time.monotonic()
 
     def add(self, text: str) -> None:
-        self._pending.append(text)
+        with self._lock:
+            self._pending.append(text)
 
     def due(self, now: float | None = None) -> bool:
         now = time.monotonic() if now is None else now
-        return bool(self._pending) and (now - self._last_run) >= self.interval_sec
+        with self._lock:
+            return (bool(self._pending) and not self._running
+                    and (now - self._last_run) >= self.interval_sec)
 
     def summarize(self) -> str | None:
-        self._last_run = time.monotonic()
-        if not self._pending or not self.llm.available():
-            return None
-        new_text = "\n".join(self._pending)
+        with self._lock:
+            self._last_run = time.monotonic()
+            if not self._pending or self._running or not self.llm.available():
+                return None
+            self._running = True
+            batch, self._pending = self._pending, []
+        try:
+            return self._summarize_batch(batch)
+        finally:
+            with self._lock:
+                self._running = False
+
+    def _summarize_batch(self, batch: list[str]) -> str | None:
+        new_text = "\n".join(batch)
         prompt = (
             "あなたは技術カンファレンスのセッションを日本語で要約するアシスタントです。"
             "これまでの要約と新しい英語文字起こしを統合し、ここまでの内容がわかる"
@@ -37,8 +53,9 @@ class RollingSummarizer:
         )
         out = self.llm.chat([{"role": "user", "content": prompt}])
         if out is None:
-            return None  # quiet skip; pending kept for next attempt
-        self._pending = []
+            with self._lock:  # quiet skip; re-queue batch for next attempt
+                self._pending = batch + self._pending
+            return None
         self.current = out
         return out
 
