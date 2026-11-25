@@ -945,7 +945,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 "stt": {"set": bool(settings.assemblyai_api_key)},
                 "gmail": {"set": bool(settings.gmail_address and settings.gmail_app_password)},
                 "models": setup.models_status(model),
-                "extension_dir": setup.shown_extension_dir()}
+                "extension_dir": str(setup.EXTENSION_DIR)}
 
     @app.post("/api/setup")
     def setup_save(body: SetupBody):

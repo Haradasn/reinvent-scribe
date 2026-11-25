@@ -1764,6 +1764,12 @@ $("btn-models").addEventListener("click", async () => {
   await postJson("/api/setup/models");
   loadSetup();
 });
+$("btn-copy-path").addEventListener("click", async () => {
+  const b = $("btn-copy-path");
+  try { await navigator.clipboard.writeText($("ext-path").textContent); b.textContent = "コピーしました ✓"; }
+  catch { b.textContent = "コピーできませんでした"; }
+  setTimeout(() => { b.textContent = "パスをコピー"; }, 2000);
+});
 $("btn-open-ext").addEventListener("click", () => postJson("/api/setup/open-extension"));
 $("btn-copy-ext").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText("chrome://extensions"); $("btn-copy-ext").textContent = "コピーしました ✓"; } catch {}

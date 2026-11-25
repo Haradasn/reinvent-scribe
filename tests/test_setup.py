@@ -66,14 +66,3 @@ def test_other_sites_cannot_call_the_app(client):
     with pytest.raises(Exception):
         with client.websocket_connect("/ws", headers=evil) as ws:
             ws.receive_text()
-
-
-def test_extension_path_hides_user_name(monkeypatch, tmp_path):
-    from pathlib import Path
-    from reinvent_scribe import setup
-    home = (tmp_path / "taro").resolve()
-    monkeypatch.setattr(Path, "home", lambda: home)
-    monkeypatch.setattr(setup, "EXTENSION_DIR", home / "app" / "extension")
-    assert setup.shown_extension_dir() == str(home.parent / "xxxx" / "app" / "extension")
-    monkeypatch.setattr(setup, "EXTENSION_DIR", tmp_path.resolve() / "app" / "extension")
-    assert setup.shown_extension_dir() == "…/app/extension"
