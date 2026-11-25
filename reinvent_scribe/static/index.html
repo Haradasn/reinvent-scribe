@@ -18,6 +18,7 @@
   <nav class="top-actions" aria-label="操作">
     <button id="btn-photos" class="ghost-btn">写真を取り込む</button>
     <button id="btn-report" class="ghost-btn">日報</button>
+    <button id="btn-setup" class="ghost-btn">設定</button>
   </nav>
   <div class="status-chips">
     <span id="chip-model" class="chip">字幕: –</span>
@@ -171,6 +172,59 @@
     <div id="cal-week" class="cal-scroll"></div>
     <aside id="week-detail" class="week-detail" aria-live="polite"></aside>
   </div>
+</dialog>
+
+<!-- Setup -->
+<dialog id="setup-modal" class="modal glass wide setup-modal" aria-labelledby="setup-title">
+  <div class="modal-head"><h2 id="setup-title">設定</h2>
+    <button class="icon-btn" data-close aria-label="閉じる" title="閉じる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <p class="setup-lead">録音と英語字幕は、1と2だけで使えます。キーはこの PC にだけ保存され、保存後に画面へ表示されることはありません。</p>
+
+  <details class="setup-card" data-step="mic"><summary><b>1. マイク</b><span class="setup-state"></span></summary>
+    <p>押してから2秒間、話しかけてください。許可を求められたら「許可」を選びます。</p>
+    <button class="primary-btn" data-test="mic">マイクを確認</button><p class="setup-note" role="status"></p></details>
+
+  <details class="setup-card" data-step="models"><summary><b>2. 音声認識モデル</b><span class="setup-state"></span></summary>
+    <p>ネットがない会場でも字幕を出すための部品です(合計 約2GB)。<b>出発前に必ず</b>ダウンロードしてください。</p>
+    <button class="primary-btn" id="btn-models">ダウンロード</button><p class="setup-note" role="status"></p></details>
+
+  <details class="setup-card" data-step="llm"><summary><b>3. 日本語訳・要約・チャット</b><span class="setup-state"></span></summary>
+    <ol>
+      <li><a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noopener">OpenAI の支払い画面</a>でクレジットを買う(最低5ドル。自動チャージはオフ)</li>
+      <li><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">API キーの画面</a>で「Create new secret key」を押し、表示されたキーをコピー</li>
+      <li>下に貼り付けて「保存して確認」</li>
+    </ol>
+    <label>API キー <input id="set-llm-key" type="password" autocomplete="off" placeholder="sk-…"></label>
+    <details class="setup-more"><summary>ほかのサービスやモデルを使う</summary>
+      <label>接続先 <input id="set-llm-url" autocomplete="off" placeholder="https://api.openai.com/v1"></label>
+      <label>モデル <input id="set-llm-model" autocomplete="off" placeholder="gpt-6-luna"></label></details>
+    <button class="primary-btn" data-save="llm">保存して確認</button><p class="setup-note" role="status"></p></details>
+
+  <details class="setup-card" data-step="stt"><summary><b>4. 速い字幕(任意)</b><span class="setup-state"></span></summary>
+    <p>設定すると字幕が速く正確になります(1時間 $0.15〜)。なくても PC 内の認識で字幕は出ます。</p>
+    <ol><li><a href="https://www.assemblyai.com/dashboard/api-keys" target="_blank" rel="noopener">AssemblyAI</a> に登録し、支払い方法を登録</li><li>API キーをコピーして貼り付け</li></ol>
+    <label>API キー <input id="set-stt-key" type="password" autocomplete="off"></label>
+    <button class="primary-btn" data-save="stt">保存して確認</button><p class="setup-note" role="status"></p></details>
+
+  <details class="setup-card" data-step="ext"><summary><b>5. 予定の取り込み(Chrome 拡張)</b><span class="setup-state"></span></summary>
+    <ol>
+      <li><button class="ghost-btn" id="btn-copy-ext">chrome://extensions をコピー</button> して、新しいタブのアドレス欄に貼り付けて開く</li>
+      <li>右上の<b>「デベロッパー モード」</b>をオンにする</li>
+      <li><button class="ghost-btn" id="btn-open-ext">拡張機能のフォルダを開く</button> で出た <b>extension</b> フォルダを、Chrome の画面にドラッグ&ドロップ
+        <br><small>うまくいかない時は「パッケージ化されていない拡張機能を読み込む」で次を選ぶ: <code id="ext-path"></code></small></li>
+      <li>この画面を再読み込みし、re:Invent のサイトにログインしてから「予定を更新」を押す</li>
+    </ol>
+    <button class="primary-btn" id="btn-check-ext">入ったか確認</button><p class="setup-note" role="status"></p></details>
+
+  <details class="setup-card" data-step="gmail"><summary><b>6. 日報メール(任意)</b><span class="setup-state"></span></summary>
+    <ol>
+      <li><a href="https://myaccount.google.com/signinoptions/two-step-verification" target="_blank" rel="noopener">2段階認証</a>をオンにする</li>
+      <li><a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">アプリパスワード</a>を作り、16文字をコピー</li>
+      <li><b>同じアカウント</b>のアドレスと一緒に貼り付け</li>
+    </ol>
+    <label>Gmail アドレス <input id="set-gmail-address" type="email" autocomplete="off"></label>
+    <label>アプリパスワード <input id="set-gmail-pass" type="password" autocomplete="off"></label>
+    <button class="primary-btn" data-save="gmail">保存して確認</button><p class="setup-note" role="status"></p></details>
 </dialog>
 
 <!-- Trash -->

@@ -8,48 +8,55 @@ re:Invent などの英語セッションを **ローカルで録音+リアルタ
 - 停止後にバックグラウンドで高精度モデルによる再文字起こし (`transcript_hq.md`)
 - 要約/チャット/日報は OpenAI 互換の LLM API(安いモデルを自由に選択、未設定でも劣化動作)
 
-## セットアップ
+## はじめかた
 
-### Mac
+**用意するもの:** Chrome と Python 3.11 以上([ダウンロード](https://www.python.org/downloads/)。Windows では最初の画面で「Add python.exe to PATH」にチェック)
 
-```bash
-git clone <this-repo> && cd reinvent-scribe
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
-python -m reinvent_scribe   # ブラウザが自動で開く
-```
+1. このページの緑の **Code** ボタン →「Download ZIP」で保存し、展開する(git が使えるなら clone でも可)
+2. フォルダの中の起動ファイルをダブルクリックする
+   - **Mac:** `start-mac.command`
+   - **Windows:** `start-windows.bat`
+3. 初回は準備に数分〜数十分かかり、終わるとブラウザが開く
+4. 開いた **「はじめの設定」** を上から順に進める(1と2だけで録音と英語字幕は使えます)
 
-### Windows
+起動中に出る黒い画面は閉じないでください。次回からも同じファイルをダブルクリックするだけです。
 
-```powershell
-git clone <this-repo>; cd reinvent-scribe
-python -m venv .venv; .venv\Scripts\Activate.ps1
-pip install -e .
-python -m reinvent_scribe
-```
+<details><summary>起動できない時</summary>
 
-> **重要: 出発前に必ず一度起動して録音→停止まで試すこと。**
-> 初回はモデル(small.en と large-v3-turbo、計 数GB)のダウンロードが走るため、
-> オフラインの現地では初回起動できません。マイク権限の許可もこのとき済ませます。
+- **Mac「開発元を確認できません」:** システム設定 → プライバシーとセキュリティ →「このまま開く」
+- **Mac で権限エラー:** ターミナルで `chmod +x ` に続けて `start-mac.command` をドラッグし、Enter
+- **Windows「PC が保護されました」:** 「詳細情報」→「実行」(社用 PC では管理者の制限で動かないことがあります)
+- **マイクが使えない:** OS の設定で、ターミナル(Windows はデスクトップ アプリ)のマイクを許可して起動し直す
 
-## 環境変数(要約・チャット・日報を使う場合)
+</details>
 
-OpenAI 互換の Chat Completions API ならどこでも使えます。安いモデル推奨
-(gpt-4o-mini / Gemini Flash 級なら 料金は必ず最新の単価を確認。目安: gemini-3.5-flash-lite で翻訳+3分ごとの要約が 1 時間 約$0.13)。
+> **出発前に必ず**、設定の2(モデルのダウンロード)と、録音 → 停止まで一度試してください。
+> 会場のネットではダウンロードが間に合わないことがあります。
 
-```bash
-export LLM_BASE_URL="https://api.openai.com/v1"
-export LLM_API_KEY="sk-..."
-export LLM_MODEL="gpt-6-luna"
-export SUMMARY_INTERVAL_SEC=180   # 準リアルタイム要約の間隔(任意)
-export LLM_FALLBACK_MODELS="a,b"  # 任意: 混雑時に順に試すモデル(Gemini は既定あり、空文字で無効)
-export ASSEMBLYAI_API_KEY="..."   # 任意: 設定すると字幕が低遅延ストリーミングに
-                                  # ($0.15/時〜。切断時はローカルに自動フォールバック)
-export DATA_DIR=data              # 保存先(任意)
-export WHISPER_MODEL=small.en     # リアルタイム用モデル(任意)
-```
+### 設定について
 
-未設定でも録音・字幕・Markdown 保存は全て動きます(要約ペインは「オフライン」表示)。
+画面右上の **「設定」** から、いつでも変更できます。キーはこのフォルダの `.env` にだけ保存され、Git には入りません。
+
+| 項目 | 必要? | できること |
+|---|---|---|
+| 1 マイク / 2 モデル | 必須 | 録音・英語字幕(ネット不要) |
+| 3 OpenAI | おすすめ | 日本語訳・要約・チャット・日報・Web 検索・写真の読み取り |
+| 4 AssemblyAI | 任意 | 速く正確な字幕 |
+| 5 Chrome 拡張 | おすすめ | 自分の re:Invent の予定と概要の取り込み |
+| 6 Gmail | 任意 | 日報・要約をメールで送る |
+
+料金の目安(2026年11月): OpenAI は 1 時間 約$0.03〜、AssemblyAI は 1 時間 $0.15〜。使う前に各社の最新の料金を確認してください。
+
+<details><summary>細かい設定(.env を直接編集)</summary>
+
+`SUMMARY_INTERVAL_SEC`(要約の間隔・秒、既定180)、`LLM_FALLBACK_MODELS`(混雑時に試すモデル、カンマ区切り)、
+`EVENT_TZ`(既定 America/Los_Angeles)、`DATA_DIR`(保存先)、`WHISPER_MODEL`(字幕用モデル)
+
+</details>
+
+### 録音と共有について
+
+録音・撮影の可否はイベントと登壇者のルールに従ってください。オンラインの機能を使うと、音声や文字起こしが各サービスに送られます。
 
 ## 使い方
 
@@ -77,14 +84,9 @@ date,start,end,id,title,venue,kind
 
 ### 「予定を更新」ボタン(Chrome 拡張)
 
-re:Invent サイトにログイン済みの Chrome なら、ボタン1つで予定を取り込めます。初回だけ:
-
-1. Chrome で `chrome://extensions` を開き、右上の「デベロッパー モード」をオン
-2. 「パッケージ化されていない拡張機能を読み込む」→ このリポジトリの `extension` フォルダを選択
-3. アプリの画面を再読み込み
-
-拡張機能はボタンを押した時だけカレンダーを開き、日付を切り替えて読むだけです(予約は変更しません)。
-以前の予定は `sessions.csv.bak` に残ります。re:Invent 側の画面が変わると読めなくなることがあります。
+導入は「設定」の5を見てください。re:Invent サイトにログイン済みの Chrome で押すと、予定と概要を取り込みます。
+拡張機能が押すのは日付と予定カードだけで、予約は変更しません。以前の予定は `sessions.csv.bak` に残ります。
+re:Invent 側の画面が変わると読めなくなることがあります。
 
 ## スライド写真
 
@@ -95,16 +97,6 @@ re:Invent サイトにログイン済みの Chrome なら、ボタン1つで予�
 - 元の写真はそのまま保存。表示・AI・メール・記事用の JPEG は位置情報などを除いたものです
 - AI での読み取りとメール添付は、押した・選んだ写真だけ。撮影や共有が禁止のスライドに注意
 - 「記事⤓」で文字起こし・要約・写真をまとめた zip を保存し、Claude に渡せます
-
-## 日報を Gmail で送る
-
-`.env` に次を設定して再起動します。アプリパスワードは Google アカウント(2段階認証が必要)で発行します。
-会社の Google Workspace では管理者が無効にしている場合があります。
-
-```
-GMAIL_ADDRESS=you@example.com
-GMAIL_APP_PASSWORD=...
-```
 
 ## glossary.txt(AWS 用語の認識精度向上)
 

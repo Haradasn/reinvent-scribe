@@ -266,7 +266,7 @@ $("btn-sum-mail").addEventListener("click", async () => {
   }
   const send = $("btn-s-send");
   send.disabled = !state.mailOk;
-  $("s-note").textContent = state.mailOk ? "" : ".env に Gmail の設定が必要です(README参照)";
+  $("s-note").textContent = state.mailOk ? "" : "右上の「設定」の6で Gmail を設定してください";
   send.onclick = async () => {
     const to = $("s-to").value.trim();
     if (!to) { $("s-note").textContent = "宛先を入力してください"; return; }
@@ -1101,7 +1101,7 @@ function showReport(tab = report.tab) {
   $("btn-copy").disabled = !report[tab];
   $("btn-mail").textContent = `${tab === "slack" ? "Slack投稿文" : "日報"}をGmailで送信`;
   $("btn-mail").disabled = !report[tab] || !state.mailOk;
-  $("mail-note").textContent = state.mailOk ? "" : ".env に Gmail の設定が必要です(README参照)";
+  $("mail-note").textContent = state.mailOk ? "" : "右上の「設定」の6で Gmail を設定してください";
 }
 $("tab-slack").addEventListener("click", () => showReport("slack"));
 $("tab-md").addEventListener("click", () => showReport("md"));
@@ -1549,7 +1549,7 @@ function syncNote(text, done) {
 }
 $("btn-sync").addEventListener("click", () => {
   syncNote("予定と概要を読み込み中…(初回は1分ほど)");
-  syncTimer = setTimeout(() => syncNote("Chrome拡張が必要です(README参照。導入後はこの画面を再読み込み)", true), 1500);
+  syncTimer = setTimeout(() => syncNote("Chrome拡張が必要です。右上の「設定」の5を見てください", true), 1500);
   // sessions whose overview is already here need not be opened again
   const known = sched.items.filter((i) => i.details)
     .map((i) => `${Number(i.date.slice(5, 7))}/${Number(i.date.slice(8))} ${i.start} ${i.title}`);
@@ -1657,6 +1657,134 @@ async function startItem(item) {
   }
   await startRecording({ schedule_key: item.key });
 }
+
+/* ---------- setup ---------- */
+const setupUI = { status: null, ext: null, results: {}, poll: null };
+const card = (step) => document.querySelector(`.setup-card[data-step="${step}"]`);
+const setupNote = (step, text, ok) => {
+  const n = card(step).querySelector(".setup-note");
+  n.textContent = text;
+  n.className = `setup-note ${ok === true ? "ok" : ok === false ? "ng" : ""}`;
+};
+const postJson = (url, body) => fetch(url, body === undefined ? { method: "POST" } : {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+});
+
+window.addEventListener("message", (ev) => {
+  if (ev.source === window && ev.data?.type === "scribe-pong") {
+    setupUI.ext = ev.data.version;
+    if (setupUI.status) paintSetup();
+  }
+});
+const pingExtension = () => window.postMessage({ type: "scribe-ping" }, location.origin);
+
+async function loadSetup() {
+  try {
+    setupUI.status = await (await fetch("/api/setup")).json();
+  } catch { return; }
+  paintSetup();
+}
+
+function paintSetup() {
+  const s = setupUI.status, r = setupUI.results;
+  const set = (step, done, yes, no) => {
+    const e = card(step).querySelector(".setup-state");
+    e.textContent = done ? `✓ ${yes}` : no;
+    e.className = `setup-state ${done ? "ok" : ""}`;
+  };
+  const m = s.models;
+  set("mic", r.mic === true, "確認済み", "未確認");
+  set("models", m.realtime && m.hq, "準備済み", m.running ? "ダウンロード中…" : "未ダウンロード");
+  set("llm", s.llm.set && r.llm !== false, r.llm ? "接続できました" : "設定済み", s.llm.set ? "要確認" : "未設定");
+  set("stt", s.stt.set && r.stt !== false, r.stt ? "接続できました" : "設定済み", s.stt.set ? "要確認" : "未設定(任意)");
+  set("ext", !!setupUI.ext, "導入済み", "未導入");
+  set("gmail", s.gmail.set && r.gmail !== false, r.gmail ? "接続できました" : "設定済み", s.gmail.set ? "要確認" : "未設定(任意)");
+  $("ext-path").textContent = s.extension_dir;
+  $("btn-models").disabled = m.running || (m.realtime && m.hq);
+  if (m.error) setupNote("models", m.error, false);
+  else if (m.running) setupNote("models", "ダウンロード中です。数分〜数十分かかります。この画面は閉じても続きます");
+  else if (m.realtime && m.hq) setupNote("models", "ネットがなくても字幕と高精度版を作れます", true);
+  clearTimeout(setupUI.poll);
+  if (m.running && $("setup-modal").open) setupUI.poll = setTimeout(loadSetup, 3000);
+}
+
+async function openSetup(first) {
+  $("setup-title").textContent = first ? "はじめの設定" : "設定";
+  $("setup-modal").showModal();
+  pingExtension();
+  await loadSetup();
+  const todo = [...document.querySelectorAll(".setup-card")].find((c) =>
+    !c.querySelector(".setup-state").classList.contains("ok"));
+  if (first && todo) todo.open = true;
+}
+$("btn-setup").addEventListener("click", () => openSetup(false));
+
+async function runTest(what, button) {
+  button.disabled = true;
+  setupNote(what, what === "mic" ? "聞いています…" : "確認しています…");
+  let d = { error: "確認できませんでした" };
+  try { d = await (await postJson(`/api/setup/test/${what}`)).json(); } catch {}
+  button.disabled = false;
+  setupUI.results[what] = !d.error;
+  if (what === "mic" && !d.error)
+    setupNote(what, d.rms < 130 ? `「${d.name}」は使えますが、音が小さめです。近づけるか、入力音量を上げてください` : `「${d.name}」を使えます`, d.rms >= 130);
+  else setupNote(what, d.error || "使えます ✓", !d.error);
+  await loadSetup();
+  refreshStatus();
+}
+for (const b of document.querySelectorAll("[data-test]"))
+  b.addEventListener("click", () => runTest(b.dataset.test, b));
+for (const b of document.querySelectorAll("[data-save]"))
+  b.addEventListener("click", async () => {
+    const what = b.dataset.save;
+    const v = (id) => $(id).value.trim();
+    let values;
+    if (what === "llm") {
+      values = { LLM_API_KEY: v("set-llm-key"), LLM_BASE_URL: v("set-llm-url"), LLM_MODEL: v("set-llm-model") };
+      // a new OpenAI key on a fresh PC needs nothing else filled in
+      const openai = values.LLM_API_KEY.startsWith("sk-");
+      if (values.LLM_API_KEY && (openai || !setupUI.status?.llm.provider)) {
+        values.LLM_BASE_URL ||= "https://api.openai.com/v1";
+        if (setupUI.status?.llm.provider !== "openai") values.LLM_MODEL ||= "gpt-6-luna";
+      }
+    } else if (what === "stt") values = { ASSEMBLYAI_API_KEY: v("set-stt-key") };
+    else values = { GMAIL_ADDRESS: v("set-gmail-address"), GMAIL_APP_PASSWORD: v("set-gmail-pass") };
+    b.disabled = true;
+    try {
+      const r = await postJson("/api/setup", { values });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "保存できませんでした");
+      for (const id of ["set-llm-key", "set-stt-key", "set-gmail-pass"]) $(id).value = "";
+      await runTest(what, b);
+    } catch (e) {
+      setupNote(what, e.message, false);
+    }
+    b.disabled = false;
+  });
+$("btn-models").addEventListener("click", async () => {
+  await postJson("/api/setup/models");
+  loadSetup();
+});
+$("btn-open-ext").addEventListener("click", () => postJson("/api/setup/open-extension"));
+$("btn-copy-ext").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText("chrome://extensions"); $("btn-copy-ext").textContent = "コピーしました ✓"; } catch {}
+});
+$("btn-check-ext").addEventListener("click", () => {
+  setupUI.ext = null;
+  pingExtension();
+  setTimeout(() => {
+    setupNote("ext", setupUI.ext ? `入っています(バージョン ${setupUI.ext})` : "見つかりません。この画面を再読み込みして、もう一度押してください", !!setupUI.ext);
+    paintSetup();
+  }, 600);
+});
+// the first visit on a fresh PC starts with the setup
+(async () => {
+  try {
+    if (localStorage.getItem("setupSeen")) return;
+    const s = await (await fetch("/api/setup")).json();
+    localStorage.setItem("setupSeen", "1");
+    if (!s.llm.set && !s.stt.set) openSetup(true);
+  } catch {}
+})();
 
 /* ---------- init ---------- */
 $("list-date").value = today();

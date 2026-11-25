@@ -26,6 +26,7 @@ from .photos import MAX_BYTES, PhotoStore, read_photo, span, suggest
 from .schedule import (item_key, load_details, load_schedule, save_details,
                        save_schedule)
 from .llm import LLMClient, transcript_chat
+from . import setup
 from .store import SessionStore
 from .summarize import RollingSummarizer, build_daily_report, build_slack_post, summarize_whole
 from .transcribe import Transcriber, load_glossary, transcribe_file
@@ -94,6 +95,10 @@ class ScheduleBody(BaseModel):
     force: bool = False
 
 
+class SetupBody(BaseModel):
+    values: dict[str, str]
+
+
 class ChatBody(BaseModel):
     question: str
 
@@ -133,16 +138,12 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
 
         def event_now():
             return datetime.now(tz).replace(tzinfo=None)
-    if streamer_factory == "auto":
-        if settings.assemblyai_api_key:
+    auto_stream = streamer_factory == "auto"
+    if auto_stream:
+        def streamer_factory(on_segment, on_partial):
             from .streaming import AssemblyAIStreamer
-            key = settings.assemblyai_api_key
-
-            def streamer_factory(on_segment, on_partial):
-                return AssemblyAIStreamer(key, on_segment=on_segment,
-                                          on_partial=on_partial)
-        else:
-            streamer_factory = None
+            return AssemblyAIStreamer(settings.assemblyai_api_key,
+                                      on_segment=on_segment, on_partial=on_partial)
     # reports read whole sessions, so they get a longer timeout than captions
     report_llm = llm or LLMClient(settings, timeout=90.0)
     llm = llm or LLMClient(settings)
@@ -160,6 +161,14 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
 
     app = FastAPI(lifespan=lifespan)
     # this app can send mail: refuse requests that reach it via another name
+    @app.middleware("http")
+    async def same_origin(request: Request, call_next):
+        # other web pages must not press this app's buttons
+        origin = request.headers.get("origin")
+        if origin and origin not in (f"http://{request.headers.get('host')}",):
+            return JSONResponse({"error": "forbidden"}, status_code=403)
+        return await call_next(request)
+
     app.add_middleware(TrustedHostMiddleware,
                        allowed_hosts=["127.0.0.1", "localhost", "testserver"])
     state = {"recording": None, "mic_ok": True, "hq_pending": []}
@@ -358,7 +367,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 except Exception:
                     log.info("closing a dead stream failed", exc_info=True)
 
-            if streamer_factory is not None:
+            if streamer_factory is not None and (
+                    not auto_stream or settings.assemblyai_api_key):
                 try:
                     _use_stream(*_open_stream())
                     log.info("using streaming STT (AssemblyAI)")
@@ -638,7 +648,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         session = _get_session(date, dirname)
         if not llm.available():
             return JSONResponse(
-                {"error": "LLM が未設定です。LLM_BASE_URL / LLM_API_KEY / LLM_MODEL を設定してください。"},
+                {"error": "画面右上の「設定」で、翻訳・要約の設定をしてください。"},
                 status_code=503)
         transcript = session.best_transcript() + photos.slide_text(session)
         answer = transcript_chat(llm, transcript, history=session.chat_history()[-20:],
@@ -691,7 +701,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
 
     def _send_mail(body: MailBody, sessions: list):
         if not (settings.gmail_address and settings.gmail_app_password):
-            return JSONResponse({"error": ".env に GMAIL_ADDRESS と GMAIL_APP_PASSWORD を設定し、アプリを再起動してください。"},
+            return JSONResponse({"error": "画面右上の「設定」で Gmail を設定してください。"},
                                 status_code=503)
         if not body.body.strip():
             return JSONResponse({"error": "本文がありません。"}, status_code=422)
@@ -925,6 +935,56 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 "summary": s.summary_text(), "chat": s.chat_history(),
                 "photos": photos.for_session(s)}
 
+    # ---------- setup ----------
+    @app.get("/api/setup")
+    def setup_status():
+        host = (settings.llm_base_url or "").lower()
+        return {"llm": {"set": llm.available(), "model": settings.llm_model,
+                        "provider": "gemini" if "googleapis" in host else
+                        "openai" if "api.openai.com" in host else "other" if host else None},
+                "stt": {"set": bool(settings.assemblyai_api_key)},
+                "gmail": {"set": bool(settings.gmail_address and settings.gmail_app_password)},
+                "models": setup.models_status(model),
+                "extension_dir": str(setup.EXTENSION_DIR)}
+
+    @app.post("/api/setup")
+    def setup_save(body: SetupBody):
+        values = {k: v for k, v in body.values.items() if v.strip()}
+        if state["recording"] is not None:
+            return JSONResponse({"error": "録音を停止してから設定してください"}, status_code=409)
+        try:
+            if values:
+                setup.save_env(Path(".env"), values)
+                setup.apply(settings, values)
+                llm.last_error = None
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=422)
+        return {"ok": True}
+
+    @app.post("/api/setup/test/{what}")
+    def setup_test(what: str):
+        if what == "mic":
+            if state["recording"] is not None:
+                return JSONResponse({"error": "録音中は確認できません"}, status_code=409)
+            return setup.test_mic()
+        check = {"llm": lambda: setup.test_llm(llm),
+                 "stt": lambda: setup.test_stt(settings.assemblyai_api_key),
+                 "gmail": lambda: setup.test_gmail(settings.gmail_address,
+                                                   settings.gmail_app_password)}.get(what)
+        if check is None:
+            raise HTTPException(status_code=404)
+        return {"error": check()}
+
+    @app.post("/api/setup/models")
+    def setup_models():
+        setup.download_models([model, setup.HQ_MODEL])
+        return {"ok": True}
+
+    @app.post("/api/setup/open-extension")
+    def setup_open_extension():
+        setup.open_extension_folder()
+        return {"ok": True}
+
     @app.get("/api/status")
     def status():
         rec: Recording | None = state["recording"]
@@ -956,6 +1016,10 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
 
     @app.websocket("/ws")
     async def websocket(ws: WebSocket):
+        origin = ws.headers.get("origin")
+        if origin and origin != f"http://{ws.headers.get('host')}":
+            await ws.close(code=1008)
+            return
         await ws.accept()
         ws_clients.add(ws)
         try:

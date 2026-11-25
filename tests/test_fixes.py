@@ -140,7 +140,7 @@ def test_main_uses_pick_model(monkeypatch):
     monkeypatch.setattr(m, "create_app",
                         lambda settings, model_name: captured.update(model=model_name))
     monkeypatch.setattr("uvicorn.run", lambda *a, **kw: None)
-    monkeypatch.setattr(sys, "argv", ["reinvent-scribe", "--no-browser"])
+    monkeypatch.setattr(sys, "argv", ["reinvent-scribe", "--no-browser", "--port", "59871"])
     m.main()
     assert captured["model"] == "base.en"
 
