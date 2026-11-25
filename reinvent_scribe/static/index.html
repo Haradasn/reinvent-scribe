@@ -21,6 +21,8 @@
   </div>
 </header>
 
+<section id="hero" class="hero" aria-live="polite"></section>
+
 <main class="layout">
   <!-- Left: recorder + captions -->
   <section class="panel glass main-panel">
@@ -76,16 +78,14 @@
       <input id="list-date" class="date-input" type="date" aria-label="表示する日付">
       <button id="btn-report" class="ghost-btn">日報生成</button>
     </div>
+    <div id="day-chips" class="day-chips"></div>
     <ul id="session-list" class="session-list"></ul>
   </section>
 </main>
 
 <!-- Start modal -->
 <dialog id="start-modal" class="modal glass">
-  <h2>セッション開始</h2>
-  <div id="suggestion-box" class="suggestion hidden">
-    <button id="btn-suggest" class="suggest-btn"></button>
-  </div>
+  <h2>予定外の録音</h2>
   <form id="start-form" method="dialog">
     <label>セッションID <input id="f-id" required placeholder="KEY001"></label>
     <label>タイトル <input id="f-title" required placeholder="Opening Keynote"></label>

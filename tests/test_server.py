@@ -160,15 +160,3 @@ def test_status_reports_mic_failure(tmp_path):
         status = c.get("/api/status").json()
         assert status["recording"] is False
         assert status["llm_ok"] is False
-
-
-def test_schedule_suggests_current_session(client, tmp_path, monkeypatch):
-    csv = tmp_path / "sessions.csv"
-    csv.write_text("2026-12-01,08:30,KEY001,Opening Keynote\n"
-                   "2026-12-01,13:00,SVS201,Serverless Deep Dive\n")
-    import reinvent_scribe.server as srv
-    monkeypatch.setattr(srv, "SCHEDULE_CSV", csv)
-    r = client.get("/api/schedule?now=2026-12-01T08:45:00")
-    assert r.status_code == 200
-    suggestions = r.json()["suggestions"]
-    assert suggestions == [{"session_id": "KEY001", "title": "Opening Keynote"}]

@@ -129,11 +129,6 @@ def test_bad_date_422(client):
     assert client.get("/api/sessions?date=not-a-date").status_code == 422
 
 
-def test_schedule_bad_now_is_safe(client):
-    r = client.get("/api/schedule?now=garbage")
-    assert r.status_code == 422
-
-
 # --- Important 4: startup wires pick_model fallback ---
 
 def test_main_uses_pick_model(monkeypatch):

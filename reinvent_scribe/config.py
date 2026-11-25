@@ -26,6 +26,7 @@ class Settings:
     llm_model: str | None = None
     assemblyai_api_key: str | None = None
     summary_interval_sec: int = 180
+    event_tz: str = "America/Los_Angeles"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -37,5 +38,6 @@ class Settings:
             llm_api_key=os.environ.get("LLM_API_KEY"),
             llm_model=os.environ.get("LLM_MODEL"),
             assemblyai_api_key=os.environ.get("ASSEMBLYAI_API_KEY"),
+            event_tz=os.environ.get("EVENT_TZ", "America/Los_Angeles"),
             summary_interval_sec=int(os.environ.get("SUMMARY_INTERVAL_SEC", "180")),
         )

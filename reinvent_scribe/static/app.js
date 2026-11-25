@@ -37,6 +37,8 @@ function syncRecordingState(s) {
   if (s.recording && s.session && !state.recording) {
     state.recording = true;
     state.current = { dirname: s.session.dirname, date: s.session.date };
+    state.currentMeta = s.session.meta;
+    setDate(s.session.meta.schedule_date || s.session.date);
     state.selected = state.current;
     state.startedAt = Date.parse(s.session.meta.started_at);
     clearInterval(state.timerId);
@@ -252,40 +254,49 @@ $("btn-record").addEventListener("click", async () => {
     setRecorderUI("recording");
     return;
   }
-  // prefill from schedule
-  try {
-    const r = await (await fetch("/api/schedule")).json();
-    const sug = r.suggestions[0];
-    const box = $("suggestion-box");
-    if (sug) {
-      box.classList.remove("hidden");
-      $("btn-suggest").textContent = `▶ 今のセッションを開始: [${sug.session_id}] ${sug.title}`;
-      $("btn-suggest").onclick = () => {
-        $("start-modal").close();
-        startRecording(sug.session_id, sug.title, "");
-      };
-      $("f-id").value = sug.session_id;
-      $("f-title").value = sug.title;
-    } else {
-      box.classList.add("hidden");
-    }
-  } catch {}
-  $("start-modal").showModal();
+  const open = sched.base === undefined ? [] : candidates().filter((i) =>
+    i.date === sched.today && evMs(i.date, i.start) - 15 * 60000 <= nowMs());
+  if (open.length === 1) startItem(open[0]);
+  else openUnscheduled();
 });
+
+function openUnscheduled() {
+  $("start-form").reset();
+  $("start-modal").showModal();
+}
 
 $("btn-cancel").addEventListener("click", () => $("start-modal").close());
 
 $("start-form").addEventListener("submit", (e) => {
   e.preventDefault();
   $("start-modal").close();
-  startRecording($("f-id").value.trim(), $("f-title").value.trim(), $("f-memo").value.trim());
+  startRecording({ session_id: $("f-id").value.trim(), title: $("f-title").value.trim(), memo: $("f-memo").value.trim() });
 });
 
-async function startRecording(id, title, memo) {
+async function startRecording(payload) {
+  if (state.busy || state.recording) return;
+  setBusy(true);
+  try {
+    await doStart(payload);
+  } catch {
+    alert("サーバに接続できませんでした");
+  } finally {
+    setBusy(false);
+    refreshSchedule();
+  }
+}
+
+function setBusy(on) {
+  state.busy = on;
+  renderHero();
+  for (const b of document.querySelectorAll(".row-rec")) b.disabled = on || state.recording;
+}
+
+async function doStart(payload) {
   const r = await fetch("/api/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: id, title, memo }),
+    body: JSON.stringify(payload),
   });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
@@ -303,9 +314,11 @@ async function startRecording(id, title, memo) {
   state.startedAt = Date.now();
   state.timerId = setInterval(tick, 1000);
   setRecorderUI("recording");
-  $("rec-title").textContent = `[${id}] ${title}`;
-  $("chat-target").textContent = `[${id}] ${title}`;
-  $("list-date").value = today();
+  const label = `[${data.meta.id}] ${data.meta.title}`;
+  state.currentMeta = data.meta;
+  $("rec-title").textContent = label;
+  $("chat-target").textContent = label;
+  setDate(data.meta.schedule_date || data.date);
   loadSessions();
 }
 
@@ -315,7 +328,7 @@ async function stopRecording() {
   const r = await fetch("/api/sessions/stop", { method: "POST" });
   if (!r.ok && r.status !== 409) {
     alert("停止に失敗しました");
-    return;
+    return false;
   }
   state.recording = false;
   state.paused = false;
@@ -326,48 +339,92 @@ async function stopRecording() {
   note.className = "captions-empty";
   note.textContent = "停止しました。高精度文字起こしをバックグラウンドで実行中 — 完了すると一覧に HQ✓ が付きます";
   $("captions").appendChild(note);
-  $("list-date").value = today();
   loadSessions();
+  refreshSchedule();
+  return true;
 }
 
 /* ---------- sessions ---------- */
+let listSeq = 0;
 async function loadSessions() {
-  const r = await (await fetch(`/api/sessions?date=${$("list-date").value || today()}`)).json();
+  const date = $("list-date").value || today();
+  const seq = ++listSeq;
+  const r = await (await fetch(`/api/sessions?date=${date}`)).json();
+  if (seq !== listSeq) return; // a newer request superseded this one
   const list = $("session-list");
-  list.innerHTML = "";
-  for (const s of r.sessions) {
-    const li = document.createElement("li");
-    const hq = s.hq
-      ? '<span class="hq-tag">HQ✓</span>'
-      : '<span class="hq-wait">HQ処理中…</span>';
-    li.innerHTML =
-      `<span class="sid">${escapeHtml(s.meta.id)}</span>` +
-      `<span>${escapeHtml(s.meta.title)}</span>` +
-      (s.meta.ended_at ? hq : '<span class="hq-wait">録音中</span>') +
-      `<button class="memo-btn" title="メモ編集">✎</button>` +
-      `<button class="memo-btn del-btn" title="削除">🗑</button>`;
-    li.querySelector(".memo-btn").onclick = () => openMemo(s);
-    li.querySelector(".del-btn").onclick = async () => {
-      if (!confirm(`[${s.meta.id}] ${s.meta.title} を削除しますか?(録音・文字起こしも消えます)`)) return;
-      const date = s.meta.started_at.slice(0, 10);
-      const r = await fetch(`/api/sessions/${date}/${s.dirname}`, { method: "DELETE" });
-      if (!r.ok) alert((await r.json().catch(() => ({}))).error || "削除に失敗しました");
-      if (r.ok && !state.recording && state.selected?.dirname === s.dirname) clearScreen();
-      loadSessions();
-    };
-    li.onclick = (e) => {
-      if (e.target.closest(".memo-btn")) return;
-      openSession(s.meta.started_at.slice(0, 10), s.dirname);
-    };
-    li.dataset.dirname = s.dirname;
-    list.appendChild(li);
+  list.replaceChildren();
+  const plans = sched.items.filter((i) => i.date === date);
+  const rest = new Set(r.sessions);
+  for (const p of plans) {
+    list.appendChild(planRow(p));
+    for (const s of r.sessions) {
+      if (s.meta.schedule_key === p.key) {
+        rest.delete(s);
+        list.appendChild(recordingRow(s));
+      }
+    }
   }
+  for (const s of rest) list.appendChild(recordingRow(s));
+  const add = document.createElement("button");
+  add.className = "ghost-btn row-rec-other";
+  add.textContent = "＋ 予定外の録音";
+  add.disabled = state.recording;
+  add.onclick = openUnscheduled;
+  const li = document.createElement("li");
+  li.className = "plan";
+  li.appendChild(add);
+  list.appendChild(li);
   markSelected();
+}
+
+function planRow(p) {
+  const li = document.createElement("li");
+  li.className = "plan";
+  li.innerHTML =
+    `<span class="row-time">${escapeHtml(p.start)}–${escapeHtml(p.end)}</span>` +
+    `<span class="row-main">${escapeHtml(p.title)}<br><span class="row-venue">${escapeHtml(p.venue)}</span></span>` +
+    (KIND[p.kind] ? `<span class="tag">${KIND[p.kind]}</span>` : "") +
+    `<button class="row-rec">${p.date === sched.today ? "● 録音" : "● テスト"}</button>`;
+  const b = li.querySelector(".row-rec");
+  b.disabled = state.recording || !!state.busy;
+  b.onclick = () => startItem(p);
+  return li;
+}
+
+function recordingRow(s) {
+  const li = document.createElement("li");
+  li.className = s.meta.schedule_key ? "rec" : "";
+  const active = state.recording && state.current?.dirname === s.dirname;
+  const status = active ? '<span class="hq-wait">録音中</span>'
+    : !s.meta.ended_at ? '<span class="hq-wait">中断</span>'
+    : s.hq ? '<span class="hq-tag">HQ✓</span>' : '<span class="hq-wait">HQ処理中…</span>';
+  li.innerHTML =
+    `<span class="sid">${escapeHtml(s.meta.id)}</span>` +
+    `<span class="row-main">${s.meta.schedule_key ? `録音 ${escapeHtml(s.meta.started_at.slice(11, 16))}` : escapeHtml(s.meta.title)}</span>` +
+    (s.meta.test ? '<span class="tag">テスト</span>' : "") + status +
+    `<button class="memo-btn" title="メモ編集">✎</button>` +
+    `<button class="memo-btn del-btn" title="削除">🗑</button>`;
+  li.querySelector(".memo-btn").onclick = () => openMemo(s);
+  li.querySelector(".del-btn").onclick = async () => {
+    if (!confirm(`[${s.meta.id}] ${s.meta.title} を削除しますか?(録音・文字起こしも消えます)`)) return;
+    const date = s.meta.started_at.slice(0, 10);
+    const r = await fetch(`/api/sessions/${date}/${s.dirname}`, { method: "DELETE" });
+    if (!r.ok) alert((await r.json().catch(() => ({}))).error || "削除に失敗しました");
+    if (r.ok && !state.recording && state.selected?.dirname === s.dirname) clearScreen();
+    refreshSchedule();
+    loadSessions();
+  };
+  li.onclick = (e) => {
+    if (e.target.closest(".memo-btn")) return;
+    openSession(s.meta.started_at.slice(0, 10), s.dirname);
+  };
+  li.dataset.dirname = s.dirname;
+  return li;
 }
 
 function markSelected() {
   for (const li of $("session-list").children)
-    li.classList.toggle("selected", li.dataset.dirname === state.selected?.dirname);
+    li.classList.toggle("selected", !!li.dataset.dirname && li.dataset.dirname === state.selected?.dirname);
 }
 
 // Show a saved recording: chat always; captions/summary only when not recording
@@ -506,9 +563,112 @@ function addChat(cls, text) {
   return div;
 }
 
+/* ---------- schedule ---------- */
+const sched = { items: [], now: null, today: null, initialized: false };
+const KIND = { favorite: "お気に入り", personal: "自分の予定" };
+
+function setDate(date) {
+  $("list-date").value = date;
+  renderChips();
+  loadSessions();
+}
+
+// Event-local timestamps compared as UTC so the Mac's own timezone never matters
+const evMs = (date, time) => Date.parse(`${date}T${time}Z`);
+const nowMs = () => sched.base + (performance.now() - sched.at);
+
+async function refreshSchedule() {
+  try {
+    const d = await (await fetch("/api/schedule")).json();
+    sched.items = d.items;
+    sched.today = d.today;
+    sched.base = Date.parse(d.now + "Z");
+    sched.at = performance.now();
+  } catch {
+    return;
+  }
+  if (!sched.initialized) {
+    sched.initialized = true;
+    if (!state.recording && sched.items.some((i) => i.date === sched.today)) setDate(sched.today);
+  }
+  renderChips();
+  renderHero();
+}
+
+function renderChips() {
+  const box = $("day-chips");
+  box.replaceChildren();
+  for (const date of new Set(sched.items.map((i) => i.date))) {
+    const b = document.createElement("button");
+    b.className = "ghost-btn";
+    const d = new Date(date + "T00:00Z");
+    b.textContent = `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${"日月火水木金土"[d.getUTCDay()]})`;
+    b.setAttribute("aria-pressed", String($("list-date").value === date));
+    b.onclick = () => setDate(date);
+    box.appendChild(b);
+  }
+}
+
+// Sessions to offer: those open now (from 15 min before start), else the next slot
+function candidates() {
+  const now = nowMs();
+  const left = sched.items.filter((i) => !i.recorded && evMs(i.date, i.end) > now);
+  const open = left.filter((i) => evMs(i.date, i.start) - 15 * 60000 <= now);
+  if (open.length) return open;
+  return left.filter((i) => i.date === left[0].date && i.start === left[0].start);
+}
+
+function until(ms) {
+  if (ms <= 0) return "開催中";
+  const min = Math.ceil(ms / 60000);
+  if (min < 60) return `あと${min}分`;
+  if (min < 1440) return `あと${Math.floor(min / 60)}時間${min % 60}分`;
+  return `あと${Math.floor(min / 1440)}日`;
+}
+
+function renderHero() {
+  const box = $("hero");
+  if (sched.base === undefined) return;
+  box.replaceChildren();
+  for (const i of candidates()) {
+    const wait = evMs(i.date, i.start) - nowMs();
+    const isToday = i.date === sched.today;
+    // while recording, only offer a switch once the next session is at hand
+    if (state.recording && (wait > 10 * 60000 || !isToday)) continue;
+    const card = document.createElement("div");
+    card.className = `panel glass hero-card${wait <= 0 ? " now" : ""}`;
+    card.innerHTML =
+      `<div class="hero-body"><div class="hero-when">${escapeHtml(i.date.slice(5).replace("-", "/"))} ` +
+      `${escapeHtml(i.start)}–${escapeHtml(i.end)}(現地)· ${until(wait)}` +
+      `${KIND[i.kind] ? ` · ${KIND[i.kind]}` : ""}</div>` +
+      `<div class="hero-title">${escapeHtml(i.title)}</div>` +
+      `<div class="hero-venue">${escapeHtml(i.venue)}</div></div>` +
+      `<button class="primary-btn"></button>`;
+    const b = card.querySelector("button");
+    b.textContent = state.busy ? "処理中…"
+      : state.recording ? "停止して次を開始" : isToday ? "● 録音開始" : "● テスト録音";
+    b.disabled = !!state.busy;
+    b.onclick = () => startItem(i);
+    box.appendChild(card);
+  }
+}
+
+async function startItem(item) {
+  if (state.busy) return;
+  if (state.recording) {
+    setBusy(true);
+    const ok = await stopRecording().catch(() => false);
+    setBusy(false);
+    if (!ok) return;
+  }
+  await startRecording({ schedule_key: item.key });
+}
+
 /* ---------- init ---------- */
 $("list-date").value = today();
-$("list-date").addEventListener("change", loadSessions);
+$("list-date").addEventListener("change", () => setDate($("list-date").value));
+refreshSchedule();
+setInterval(refreshSchedule, 30000);
 refreshStatus();
 setInterval(refreshStatus, 10000);
 loadSessions();

@@ -60,16 +60,19 @@ export WHISPER_MODEL=small.en     # リアルタイム用モデル(任意)
 4. **夜**: `transcript_hq.md` を Claude に渡して記事化(`prompts/nightly_article.md` 参照)
 5. **1日の終わり**: 「日報生成」ボタン → コピー → Slack に貼って上司へ共有
 
-## sessions.csv(1クリック開始用)
+## sessions.csv(予定から1クリックで録音)
 
-リポジトリ直下に置く。形式: `日付,開始時刻,セッションID,タイトル`
+リポジトリ直下に置く(個人の予定なので Git には入りません)。UTF-8、1行目は見出し:
 
 ```csv
-2026-12-01,08:30,KEY001,Opening Keynote
-2026-12-01,13:00,SVS201,Serverless Deep Dive
+date,start,end,id,title,venue,kind
+2026-12-01,08:30,10:45,KEY001,Opening Keynote,Venetian,reserved
 ```
 
-現在時刻 ±30 分のセッションが起動モーダルに自動提案されます。
+- 時刻は現地時間(既定 `EVENT_TZ=America/Los_Angeles`)。PC の時刻設定には影響されません
+- `id` は空でよい(曜日+開始時刻になります)。`kind` は reserved / favorite / personal
+- カンマを含む項目は `"` で囲む。保存後30秒以内に画面へ反映されます
+- 予定日以外に録音すると「テスト」扱いになり、予定は録音済みになりません
 
 ## glossary.txt(AWS 用語の認識精度向上)
 

@@ -10,6 +10,7 @@ dependencies = [
     "faster-whisper",
     "httpx",
     "numpy",
+    "tzdata; platform_system == 'Windows'",
 ]
 
 [project.optional-dependencies]

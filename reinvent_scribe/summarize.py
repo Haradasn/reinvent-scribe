@@ -72,17 +72,32 @@ class RollingSummarizer:
         return out
 
 
+def _time(s: Session) -> str:
+    m = s.meta
+    if m.get("planned_start"):
+        return f"{m['planned_start']}–{m['planned_end']}"
+    return m["started_at"][11:16]
+
+
+def _date(sessions: list[Session]) -> str:
+    m = sessions[0].meta
+    return m.get("schedule_date") or m["started_at"][:10]
+
+
 def _session_table(sessions: list[Session]) -> str:
-    rows = ["| 時刻 | ID | セッション |", "| --- | --- | --- |"]
+    def cell(text: str) -> str:
+        return text.replace(" | ", " / ").replace("|", "/")
+
+    rows = ["| 時刻 | ID | セッション | 会場 |", "| --- | --- | --- | --- |"]
     for s in sessions:
-        started = s.meta["started_at"][11:16]
-        rows.append(f"| {started} | {s.meta['id']} | {s.meta['title']} |")
+        rows.append(f"| {_time(s)} | {cell(s.meta['id'])} | {cell(s.meta['title'])} "
+                    f"| {cell(s.meta.get('venue', ''))} |")
     return "\n".join(rows)
 
 
 def build_daily_report(sessions: list[Session], llm) -> str:
     """Markdown 出張日報: 行動概要 → 各セッション要点 → 所感."""
-    date = sessions[0].meta["started_at"][:10] if sessions else ""
+    date = _date(sessions) if sessions else ""
     parts = [f"# 出張日報 {date}".rstrip(), ""]
     if not sessions:
         parts.append("本日の出席セッションはありません。")
@@ -125,7 +140,7 @@ def build_slack_post(sessions: list[Session], llm, report_md: str,
     head = [mention.strip()] if mention.strip() else []
     if not sessions:
         return "\n".join(head + ["本日の出席セッションはありません。"])
-    date = sessions[0].meta["started_at"][:10]
+    date = _date(sessions)
     head.append(f"お疲れ様です。re:Invent 出張日報({date})です。")
     body = None
     if llm.available():
@@ -138,7 +153,7 @@ def build_slack_post(sessions: list[Session], llm, report_md: str,
             "要約を生成できなかったセッションは【主なポイント】に含めない。\n\n" + report_md)
     if not body:
         lines = ["【参加セッション】"]
-        lines += [f"・{s.meta['started_at'][11:16]} [{s.meta['id']}] {s.meta['title']}"
+        lines += [f"・{_time(s)} [{s.meta['id']}] {s.meta['title']}"
                   for s in sessions]
         memos = [f"・[{s.meta['id']}] {s.meta['memo']}" for s in sessions if s.meta.get("memo")]
         if memos:

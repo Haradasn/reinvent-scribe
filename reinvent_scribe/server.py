@@ -1,12 +1,12 @@
 import asyncio
-import csv
 import logging
 import queue
 import re
 import shutil
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from .audio import MicStream, WavWriter
 from .config import Settings
+from .schedule import load_schedule
 from .llm import LLMClient, transcript_chat
 from .store import SessionStore
 from .summarize import RollingSummarizer, build_daily_report, build_slack_post
@@ -29,8 +30,9 @@ GLOSSARY = Path("glossary.txt")
 
 
 class StartBody(BaseModel):
-    session_id: str
-    title: str
+    session_id: str = ""
+    title: str = ""
+    schedule_key: str | None = None
     memo: str = ""
 
 
@@ -73,8 +75,14 @@ def _check_date(date: str) -> None:
 def create_app(settings: Settings | None = None, mic_factory=MicStream,
                transcriber_factory=Transcriber,
                transcribe_file_fn=transcribe_file, llm: LLMClient | None = None,
-               model_name: str | None = None, streamer_factory="auto") -> FastAPI:
+               model_name: str | None = None, streamer_factory="auto",
+               event_now=None) -> FastAPI:
     settings = settings or Settings.from_env()
+    if event_now is None:
+        tz = ZoneInfo(settings.event_tz)
+
+        def event_now():
+            return datetime.now(tz).replace(tzinfo=None)
     if streamer_factory == "auto":
         if settings.assemblyai_api_key:
             from .streaming import AssemblyAIStreamer
@@ -117,7 +125,25 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         with lock:
             if state["recording"] is not None:
                 return JSONResponse({"error": "already recording"}, status_code=409)
-            session = store.create(body.session_id, body.title, body.memo)
+            session_id, title, extra = body.session_id, body.title, {}
+            if body.schedule_key:
+                item = next((i for i in load_schedule(SCHEDULE_CSV)
+                             if i["key"] == body.schedule_key), None)
+                if item is None:
+                    return JSONResponse({"error": "予定が見つかりません。画面を再読み込みしてください。"},
+                                        status_code=404)
+                session_id, title = item["id"], item["title"]
+                extra = {"venue": item["venue"], "planned_start": item["start"],
+                         "planned_end": item["end"]}
+                if item["date"] == f"{event_now():%Y-%m-%d}":
+                    extra.update(schedule_key=item["key"],
+                                 schedule_date=item["date"])
+                else:  # rehearsal: must not mark the real session as recorded
+                    extra = {"venue": item["venue"], "test": True}
+            if not session_id or not title:
+                return JSONResponse({"error": "IDとタイトルを入力してください。"},
+                                    status_code=422)
+            session = store.create(session_id, title, body.memo, extra=extra)
             wav = WavWriter(session.dir / "audio.wav")
             summarizer = RollingSummarizer(llm, settings.summary_interval_sec)
 
@@ -413,26 +439,13 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 "model": model, "hq_pending": list(state["hq_pending"])}
 
     @app.get("/api/schedule")
-    def schedule(now: str | None = None):
-        try:
-            ts = datetime.fromisoformat(now) if now else datetime.now()
-        except ValueError:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=422, detail="invalid now")
-        suggestions = []
-        if SCHEDULE_CSV.exists():
-            with open(SCHEDULE_CSV, encoding="utf-8") as f:
-                for row in csv.reader(f):
-                    if len(row) < 4:
-                        continue
-                    date, start, sid, title = [c.strip() for c in row[:4]]
-                    try:
-                        begin = datetime.fromisoformat(f"{date}T{start}")
-                    except ValueError:
-                        continue
-                    if abs(ts - begin) <= timedelta(minutes=30):
-                        suggestions.append({"session_id": sid, "title": title})
-        return {"suggestions": suggestions}
+    def schedule():
+        now = event_now()
+        done = {x.meta.get("schedule_key") for x in store.all()}
+        return {"now": now.isoformat(timespec="seconds"),
+                "today": f"{now:%Y-%m-%d}", "timezone": settings.event_tz,
+                "items": [{**i, "recorded": i["key"] in done}
+                          for i in load_schedule(SCHEDULE_CSV)]}
 
     @app.websocket("/ws")
     async def websocket(ws: WebSocket):

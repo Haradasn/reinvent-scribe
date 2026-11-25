@@ -20,7 +20,7 @@ class Session:
 
     @classmethod
     def create(cls, dir: Path, session_id: str, title: str, memo: str,
-               started_at: datetime) -> "Session":
+               started_at: datetime, extra: dict | None = None) -> "Session":
         dir.mkdir(parents=True, exist_ok=True)
         meta = {
             "id": session_id,
@@ -28,6 +28,7 @@ class Session:
             "memo": memo,
             "started_at": started_at.isoformat(),
             "ended_at": None,
+            **(extra or {}),
         }
         session = cls(dir, meta)
         session._save_meta()
@@ -107,19 +108,29 @@ class SessionStore:
         self.data_dir = Path(data_dir)
 
     def create(self, session_id: str, title: str, memo: str = "",
-               started_at: datetime | None = None) -> Session:
+               started_at: datetime | None = None,
+               extra: dict | None = None) -> Session:
         started_at = started_at or datetime.now()
-        dirname = f"{started_at:%m%d_%H%M}_{_sanitize(session_id)}"
-        dir = self.data_dir / f"{started_at:%Y-%m-%d}" / dirname
-        return Session.create(dir, session_id, title, memo, started_at)
+        day = self.data_dir / f"{started_at:%Y-%m-%d}"
+        base = f"{started_at:%m%d_%H%M}_{_sanitize(session_id)}"
+        dir, n = day / base, 2
+        while dir.exists():  # never overwrite an earlier recording
+            dir, n = day / f"{base}-{n}", n + 1
+        return Session.create(dir, session_id, title, memo, started_at, extra)
+
+    def all(self) -> list[Session]:
+        out = []
+        for path in self.data_dir.glob("*/*/meta.json"):
+            try:
+                out.append(Session.load(path.parent))
+            except (ValueError, OSError):
+                continue  # e.g. being deleted or half-written
+        return sorted(out, key=lambda s: s.meta["started_at"])
 
     def list_for_date(self, date: str) -> list[Session]:
-        day_dir = self.data_dir / date
-        if not day_dir.is_dir():
-            return []
-        sessions = [Session.load(d) for d in sorted(day_dir.iterdir())
-                    if (d / "meta.json").exists()]
-        return sessions
+        """Recordings of that event day (linked schedule date wins)."""
+        return [s for s in self.all()
+                if (s.meta.get("schedule_date") or s.dir.parent.name) == date]
 
     def get(self, date: str, dirname: str) -> Session:
         return Session.load(self.data_dir / date / dirname)
