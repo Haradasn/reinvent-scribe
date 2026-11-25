@@ -274,3 +274,52 @@ def test_summary_saved_on_stop(tmp_path):
     # summary.md exists iff a summary was produced; with interval 0 it ran
     assert summary.exists()
     assert "累積要約テキスト" in summary.read_text()
+
+
+# --- stop must finish every step even if an earlier one fails ---
+
+def test_stop_finalizes_even_if_mic_stop_fails(tmp_path):
+    from tests.test_streaming import FakeStreamer
+
+    class StopFailMic(FakeMic):
+        def stop(self):
+            raise RuntimeError("PortAudio error")
+
+    class S(FakeStreamer):
+        stopped = False
+
+        def stop(self):
+            S.stopped = True
+
+    app = create_app(settings=Settings(data_dir=tmp_path), mic_factory=StopFailMic,
+                     transcriber_factory=FakeTranscriber,
+                     transcribe_file_fn=fake_transcribe_file, llm=FakeLLM(),
+                     model_name="small.en", streamer_factory=S)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        c.post("/api/sessions", json={"session_id": "SF", "title": "t"})
+        assert c.post("/api/sessions/stop").status_code == 200
+        meta = list(tmp_path.glob("*/*/meta.json"))[0].read_text()
+    assert '"ended_at": null' not in meta
+    assert S.stopped
+
+
+def test_failed_streamer_is_closed_on_fallback(tmp_path):
+    from tests.test_streaming import FakeStreamer
+
+    class S(FakeStreamer):
+        stopped = False
+
+        def feed(self, pcm):
+            raise ConnectionError("dropped")
+
+        def stop(self):
+            S.stopped = True
+
+    app = create_app(settings=Settings(data_dir=tmp_path), mic_factory=FakeMic,
+                     transcriber_factory=FakeTranscriber,
+                     transcribe_file_fn=fake_transcribe_file, llm=FakeLLM(),
+                     model_name="small.en", streamer_factory=S)
+    with TestClient(app) as c:
+        c.post("/api/sessions", json={"session_id": "SF2", "title": "t"})
+        c.post("/api/sessions/stop")
+    assert S.stopped

@@ -23,7 +23,8 @@ def main() -> None:
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open,
                         args=(f"http://127.0.0.1:{args.port}",)).start()
-    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    uvicorn.run(app, host="127.0.0.1", port=args.port,
+                timeout_graceful_shutdown=3)
 
 
 if __name__ == "__main__":

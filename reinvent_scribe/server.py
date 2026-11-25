@@ -206,7 +206,11 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                             except Exception:
                                 log.warning("stream feed failed; falling back "
                                             "to local whisper", exc_info=True)
-                                engine["streamer"] = None
+                                dead, engine["streamer"] = engine["streamer"], None
+                                try:
+                                    dead.stop()
+                                except Exception:
+                                    log.exception("streamer close failed")
                                 broadcast({"type": "stt_fallback"})
                         _local_transcriber().feed(
                             frames.astype(np.float32) / 32768.0)
@@ -243,19 +247,26 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             if rec is None:
                 return JSONResponse({"error": "not recording"}, status_code=409)
             state["recording"] = None
-        rec.mic.stop()
+        # Every step runs even if an earlier one fails, so the WAV is always
+        # closed and the (billed) streaming connection is always released.
+        def _step(name, fn):
+            try:
+                fn()
+            except Exception:
+                log.exception("stop step failed: %s", name)
+
+        if not rec.paused:
+            _step("mic", rec.mic.stop)
         rec.frame_queue.put(None)
         rec.worker.join(timeout=30)
+        # engines first: their final segments still need translating
+        for name, part in list(rec.engine.items()):
+            if part is not None:
+                _step(name, part.stop)
         if rec.jp_worker is not None:
             rec.jp_queue.put(None)
             rec.jp_worker.join(timeout=20)
-        for part in rec.engine.values():
-            if part is not None:
-                try:
-                    part.stop()
-                except Exception:
-                    log.exception("engine stop failed")
-        rec.wav.close()
+        _step("wav", rec.wav.close)
         # flush any un-summarized tail, then persist the rolling summary
         try:
             tail = rec.summarizer.summarize()
