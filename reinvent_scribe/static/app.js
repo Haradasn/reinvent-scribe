@@ -6,9 +6,16 @@ const state = {
   startedAt: null,
   timerId: null,
   selected: null, // chat target {dirname, date}
+  viewId: 0, // bumped on clear; late replies for an older view are dropped
+  cleared: false, // ignore late captions after the user cleared the screen
 };
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Local date, not UTC: the server names day folders by local time
+const today = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
 
 /* ---------- status chips ---------- */
 async function refreshStatus() {
@@ -92,6 +99,7 @@ function connectWS() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    if (state.cleared && ["segment", "partial", "jp", "summary"].includes(msg.type)) return;
     if (msg.type === "segment") { clearPartial(); addCaption(msg.ts, msg.text); }
     if (msg.type === "partial") showPartial(msg.text);
     if (msg.type === "jp") addJapanese(msg.ts, msg.text);
@@ -185,7 +193,38 @@ function setRecorderUI(mode) {
   $("btn-record").title = { idle: "録音開始", recording: "一時停止", paused: "再開" }[mode];
   $("btn-stop").classList.toggle("hidden", mode === "idle");
   $("rec-timer").classList.toggle("paused", mode === "paused");
+  $("btn-clear").classList.toggle("hidden", mode !== "idle" || !hasContent());
 }
+
+/* ---------- clear screen (files on disk are untouched) ---------- */
+function hasContent() {
+  return !!document.querySelector(".caption, .summary-card, .chat-msg");
+}
+
+function setPlaceholder(id, text) {
+  const div = document.createElement("div");
+  div.className = "captions-empty";
+  div.textContent = text;
+  $(id).replaceChildren(div);
+}
+
+function clearScreen() {
+  state.viewId++;
+  setPlaceholder("captions", "録音を開始すると、ここに英語字幕が流れます");
+  setPlaceholder("summaries", "オンライン時、定期的に要約が積まれます");
+  $("chat-log").replaceChildren();
+  $("chat-input").value = "";
+  $("chat-input").placeholder = "文字起こしについて質問する…";
+  $("rec-timer").textContent = "00:00:00";
+  state.current = null;
+  state.selected = null;
+  $("btn-clear").classList.add("hidden");
+}
+
+$("btn-clear").addEventListener("click", () => {
+  state.cleared = true;
+  clearScreen();
+});
 
 $("btn-record").addEventListener("click", async () => {
   if (state.recording && !state.paused) {
@@ -248,6 +287,8 @@ async function startRecording(id, title, memo) {
     return;
   }
   const data = await r.json();
+  clearScreen();
+  state.cleared = false;
   state.recording = true;
   state.paused = false;
   state.current = { dirname: data.dirname, date: data.date };
@@ -256,13 +297,16 @@ async function startRecording(id, title, memo) {
   state.timerId = setInterval(tick, 1000);
   setRecorderUI("recording");
   $("rec-title").textContent = `[${id}] ${title}`;
-  $("captions").innerHTML = "";
 }
 
 $("btn-stop").addEventListener("click", () => stopRecording());
 
 async function stopRecording() {
-  await fetch("/api/sessions/stop", { method: "POST" });
+  const r = await fetch("/api/sessions/stop", { method: "POST" });
+  if (!r.ok && r.status !== 409) {
+    alert("停止に失敗しました");
+    return;
+  }
   state.recording = false;
   state.paused = false;
   clearInterval(state.timerId);
@@ -353,6 +397,7 @@ $("chat-form").addEventListener("submit", async (e) => {
     return;
   }
   $("chat-input").value = "";
+  const view = state.viewId;
   addChat("user", q);
   const typing = addChat("assistant typing", "考え中");
   const r = await fetch(`/api/sessions/${target.date}/${target.dirname}/chat`, {
@@ -362,6 +407,7 @@ $("chat-form").addEventListener("submit", async (e) => {
   });
   const data = await r.json().catch(() => ({}));
   typing.remove();
+  if (view !== state.viewId) return; // screen was cleared; reply is in chat.md
   addChat("assistant", r.ok ? data.answer : (data.error || "エラーが発生しました"));
 });
 
@@ -371,6 +417,7 @@ function addChat(cls, text) {
   div.className = `chat-msg ${cls}`;
   div.textContent = text;
   log.appendChild(div);
+  if (!state.recording) $("btn-clear").classList.remove("hidden");
   log.scrollTop = log.scrollHeight;
   return div;
 }

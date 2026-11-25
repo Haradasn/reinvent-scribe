@@ -282,6 +282,7 @@ body {
   background: rgba(0,0,0,0.3); border: 1px solid var(--border); margin-bottom: 14px;
 }
 .hidden { display: none; }
+.panel-foot { margin-top: 10px; text-align: right; }
 
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }

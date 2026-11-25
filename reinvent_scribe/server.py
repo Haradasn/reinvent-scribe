@@ -151,6 +151,11 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             def _run_summary() -> None:
                 out = summarizer.summarize()
                 if out:
+                    try:
+                        (session.dir / "summary.md").write_text(
+                            out, encoding="utf-8")
+                    except Exception:
+                        log.exception("summary save failed")
                     broadcast({"type": "summary", "text": out})
 
             engine = {"transcriber": None, "streamer": None}
@@ -251,6 +256,16 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 except Exception:
                     log.exception("engine stop failed")
         rec.wav.close()
+        # flush any un-summarized tail, then persist the rolling summary
+        try:
+            tail = rec.summarizer.summarize()
+            if tail:
+                broadcast({"type": "summary", "text": tail})
+            if rec.summarizer.current:
+                (rec.session.dir / "summary.md").write_text(
+                    rec.summarizer.current, encoding="utf-8")
+        except Exception:
+            log.exception("summary persistence failed")
         rec.session.finalize()
         state["hq_pending"].append(rec.session.dir.name)
 

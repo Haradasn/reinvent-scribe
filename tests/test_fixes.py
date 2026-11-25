@@ -245,3 +245,32 @@ def test_pause_and_resume(client):
 def test_pause_without_recording_409(client):
     assert client.post("/api/sessions/pause").status_code == 409
     assert client.post("/api/sessions/resume").status_code == 409
+
+
+# --- rolling summary persisted per session on stop ---
+
+def test_summary_saved_on_stop(tmp_path):
+    class SummaryLLM:
+        def available(self):
+            return True
+
+        def chat(self, messages, max_tokens=1000):
+            return "累積要約テキスト"
+
+    app = create_app(settings=Settings(data_dir=tmp_path, summary_interval_sec=0),
+                     mic_factory=FakeMic, transcriber_factory=FakeTranscriber,
+                     transcribe_file_fn=fake_transcribe_file,
+                     llm=SummaryLLM(), model_name="small.en")
+    with TestClient(app) as c:
+        r = c.post("/api/sessions", json={"session_id": "SUM1", "title": "t", "memo": ""})
+        dirname, date = r.json()["dirname"], r.json()["date"]
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            time.sleep(0.05)
+            if (tmp_path / date / dirname).exists():
+                break
+        c.post("/api/sessions/stop")
+    summary = tmp_path / date / dirname / "summary.md"
+    # summary.md exists iff a summary was produced; with interval 0 it ran
+    assert summary.exists()
+    assert "累積要約テキスト" in summary.read_text()
