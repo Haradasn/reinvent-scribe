@@ -30,3 +30,21 @@ def test_from_env_overrides(monkeypatch):
     assert s.data_dir == Path("/tmp/scribe-data")
     assert s.whisper_model == "base.en"
     assert s.summary_interval_sec == 60
+
+
+def test_loads_dotenv_file(monkeypatch, tmp_path):
+    for var in ("LLM_BASE_URL", "ASSEMBLYAI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    (tmp_path / ".env").write_text(
+        'ASSEMBLYAI_API_KEY=aai-secret\nLLM_BASE_URL="https://x.example/v1"\n# comment\n')
+    monkeypatch.chdir(tmp_path)
+    s = Settings.from_env()
+    assert s.assemblyai_api_key == "aai-secret"
+    assert s.llm_base_url == "https://x.example/v1"
+
+
+def test_real_env_wins_over_dotenv(monkeypatch, tmp_path):
+    monkeypatch.setenv("ASSEMBLYAI_API_KEY", "from-shell")
+    (tmp_path / ".env").write_text("ASSEMBLYAI_API_KEY=from-file\n")
+    monkeypatch.chdir(tmp_path)
+    assert Settings.from_env().assemblyai_api_key == "from-shell"

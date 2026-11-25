@@ -301,7 +301,13 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
 
     @app.get("/api/status")
     def status():
-        return {"recording": state["recording"] is not None,
+        rec: Recording | None = state["recording"]
+        session = None
+        if rec is not None:
+            session = {"dirname": rec.session.dir.name,
+                       "date": rec.session.meta["started_at"][:10],
+                       "meta": rec.session.meta}
+        return {"recording": rec is not None, "session": session,
                 "mic_ok": state["mic_ok"], "llm_ok": llm.available(),
                 "model": model, "hq_pending": list(state["hq_pending"])}
 

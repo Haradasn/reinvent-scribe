@@ -184,3 +184,15 @@ def test_transcribe_file_passes_ndarray(tmp_path, monkeypatch):
     tr.transcribe_file(wav, model_name="large-v3-turbo")
     audio = model.calls_audio[0]
     assert isinstance(audio, np.ndarray) and audio.dtype == np.float32
+
+
+# --- status exposes the active session so the UI can restore after reload ---
+
+def test_status_includes_active_session(client):
+    r = client.post("/api/sessions", json={"session_id": "ACT1", "title": "Active", "memo": ""})
+    status = client.get("/api/status").json()
+    assert status["recording"] is True
+    assert status["session"]["meta"]["id"] == "ACT1"
+    assert status["session"]["dirname"] == r.json()["dirname"]
+    client.post("/api/sessions/stop")
+    assert client.get("/api/status").json()["session"] is None

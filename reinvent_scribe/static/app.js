@@ -20,7 +20,27 @@ async function refreshStatus() {
     const badge = $("summary-badge");
     badge.textContent = s.llm_ok ? "オンライン" : "オフライン(字幕のみ)";
     badge.className = `badge ${s.llm_ok ? "online" : "offline"}`;
+    syncRecordingState(s);
   } catch {}
+}
+
+// Restore recording UI after a page reload while a session is running
+function syncRecordingState(s) {
+  if (s.recording && s.session && !state.recording) {
+    state.recording = true;
+    state.current = { dirname: s.session.dirname, date: s.session.date };
+    state.selected = state.current;
+    state.startedAt = Date.parse(s.session.meta.started_at);
+    clearInterval(state.timerId);
+    state.timerId = setInterval(tick, 1000);
+    $("btn-record").classList.add("recording");
+    $("rec-title").textContent = `[${s.session.meta.id}] ${s.session.meta.title}`;
+  } else if (!s.recording && state.recording) {
+    state.recording = false;
+    clearInterval(state.timerId);
+    $("btn-record").classList.remove("recording");
+    $("rec-title").textContent = "待機中";
+  }
 }
 function setChip(id, text, ok) {
   const el = $(id);
