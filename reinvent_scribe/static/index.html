@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>re:Invent Scribe</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="bg-gradient"></div>
+
+<header class="topbar glass">
+  <div class="brand">
+    <span class="logo-dot"></span>
+    <h1>re:Invent <em>Scribe</em></h1>
+  </div>
+  <div class="status-chips">
+    <span id="chip-model" class="chip">model: –</span>
+    <span id="chip-llm" class="chip">LLM: –</span>
+    <span id="chip-mic" class="chip">mic: –</span>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- Left: recorder + captions -->
+  <section class="panel glass main-panel">
+    <div class="recorder">
+      <button id="btn-record" class="record-btn" title="録音開始">
+        <span class="record-icon"></span>
+      </button>
+      <div class="recorder-info">
+        <div id="rec-title" class="rec-title">待機中</div>
+        <div id="rec-timer" class="rec-timer">00:00:00</div>
+      </div>
+      <canvas id="waveform" width="320" height="56"></canvas>
+    </div>
+
+    <div id="captions" class="captions">
+      <div class="captions-empty">録音を開始すると、ここに英語字幕が流れます</div>
+    </div>
+  </section>
+
+  <!-- Right: summary + sessions -->
+  <aside class="sidebar">
+    <section class="panel glass">
+      <div class="panel-head">
+        <h2>日本語要約</h2>
+        <span id="summary-badge" class="badge offline">オフライン(字幕のみ)</span>
+      </div>
+      <div id="summaries" class="summaries">
+        <div class="captions-empty">オンライン時、数分ごとに要約が積まれます</div>
+      </div>
+    </section>
+
+    <section class="panel glass">
+      <div class="panel-head">
+        <h2>本日のセッション</h2>
+        <button id="btn-report" class="ghost-btn">日報生成</button>
+      </div>
+      <ul id="session-list" class="session-list"></ul>
+    </section>
+  </aside>
+</main>
+
+<!-- Chat dock -->
+<section class="panel glass chat-dock">
+  <div id="chat-log" class="chat-log"></div>
+  <form id="chat-form" class="chat-form">
+    <input id="chat-input" type="text" placeholder="文字起こしについて質問する…" autocomplete="off">
+    <button type="submit" class="send-btn">送信</button>
+  </form>
+</section>
+
+<!-- Start modal -->
+<dialog id="start-modal" class="modal glass">
+  <h2>セッション開始</h2>
+  <div id="suggestion-box" class="suggestion hidden">
+    <button id="btn-suggest" class="suggest-btn"></button>
+  </div>
+  <form id="start-form" method="dialog">
+    <label>セッションID <input id="f-id" required placeholder="KEY001"></label>
+    <label>タイトル <input id="f-title" required placeholder="Opening Keynote"></label>
+    <label>メモ <textarea id="f-memo" rows="2" placeholder="任意"></textarea></label>
+    <div class="modal-actions">
+      <button type="button" id="btn-cancel" class="ghost-btn">キャンセル</button>
+      <button type="submit" class="primary-btn">録音開始</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Report modal -->
+<dialog id="report-modal" class="modal glass wide">
+  <h2>出張日報</h2>
+  <pre id="report-body" class="report-body"></pre>
+  <div class="modal-actions">
+    <button id="btn-copy" class="primary-btn">コピー</button>
+    <button id="btn-report-close" class="ghost-btn">閉じる</button>
+  </div>
+</dialog>
+
+<!-- Memo modal -->
+<dialog id="memo-modal" class="modal glass">
+  <h2>メモ編集</h2>
+  <textarea id="memo-edit" rows="4"></textarea>
+  <div class="modal-actions">
+    <button id="btn-memo-save" class="primary-btn">保存</button>
+    <button id="btn-memo-close" class="ghost-btn">閉じる</button>
+  </div>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
