@@ -3,7 +3,8 @@ from pathlib import Path
 from reinvent_scribe.config import Settings
 
 
-def test_from_env_defaults(monkeypatch):
+def test_from_env_defaults(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)  # avoid reading the repo's real .env
     for var in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "DATA_DIR",
                 "WHISPER_MODEL", "SUMMARY_INTERVAL_SEC"):
         monkeypatch.delenv(var, raising=False)
