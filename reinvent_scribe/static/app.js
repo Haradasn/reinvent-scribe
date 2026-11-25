@@ -418,8 +418,11 @@ function escapeHtml(s) {
 function setRecorderUI(mode) {
   // mode: "idle" | "recording" | "paused"
   // the browser tab shows whether this window is recording
-  $("favicon").href = { idle: "/static/favicon.svg", recording: "/static/favicon-rec.svg",
-                        paused: "/static/favicon-paused.svg" }[mode];
+  // a new <link> element: Chrome may ignore a changed href on the old one
+  const icon = $("favicon").cloneNode();
+  icon.href = { idle: "/static/favicon.svg", recording: "/static/favicon-rec.svg",
+                paused: "/static/favicon-paused.svg" }[mode];
+  $("favicon").replaceWith(icon);
   document.title = { idle: "", recording: "● 録音中 - ", paused: "一時停止中 - " }[mode] + "re:Invent Scribe";
   $("btn-record").dataset.state = mode;
   $("btn-record").classList.toggle("recording", mode === "recording");

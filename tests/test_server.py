@@ -182,3 +182,8 @@ def test_glossary_edit_applies_to_next_recording(tmp_path, monkeypatch):
         gl.write_text("Karpenter\n")
         _start(c, "B"); c.post("/api/sessions/stop")
     assert prompts[0] == "Kiro" and prompts[-1] == "Karpenter"
+
+
+def test_static_files_are_revalidated(client):
+    assert client.get("/static/app.js").headers["cache-control"] == "no-cache"
+    assert "cache-control" not in client.get("/api/status").headers
