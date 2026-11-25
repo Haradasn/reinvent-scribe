@@ -40,7 +40,7 @@ OpenAI 互換の Chat Completions API ならどこでも使えます。安いモ
 ```bash
 export LLM_BASE_URL="https://api.openai.com/v1"
 export LLM_API_KEY="sk-..."
-export LLM_MODEL="gpt-4o-mini"
+export LLM_MODEL="gpt-6-luna"
 export SUMMARY_INTERVAL_SEC=180   # 準リアルタイム要約の間隔(任意)
 export LLM_FALLBACK_MODELS="a,b"  # 任意: 混雑時に順に試すモデル(Gemini は既定あり、空文字で無効)
 export ASSEMBLYAI_API_KEY="..."   # 任意: 設定すると字幕が低遅延ストリーミングに

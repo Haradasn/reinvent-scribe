@@ -32,6 +32,7 @@ async function refreshStatus() {
     badge.textContent = ai;
     badge.className = `badge ${s.llm_ok && !s.llm_error ? "online" : "offline"}`;
     state.mailOk = s.mail_ok;
+    state.webOk = s.web_ok;
     syncRecordingState(s);
   } catch {}
 }
@@ -495,7 +496,12 @@ async function openSession(date, dirname) {
   $("chat-target").textContent = `[${d.meta.id}] ${d.meta.title}`;
   $("chat-input").placeholder = `[${d.meta.id}] について質問する…`;
   $("chat-log").replaceChildren();
-  for (const m of d.chat) addChat(m.role, m.content);
+  let asked = "";
+  for (const [i, m] of d.chat.entries()) {
+    const el = addChat(m.role, m.content);
+    if (m.role === "user") asked = m.content;
+    if (m.role === "assistant" && d.chat[i + 1]?.role !== "web") offerWeb(el, asked, { date, dirname });
+  }
   if (state.recording) return;
   state.viewing = true;
   $("rec-title").textContent = `[${d.meta.id}] ${d.meta.title}(保存済み)`;
@@ -643,14 +649,56 @@ $("chat-form").addEventListener("submit", async (e) => {
   typing.remove();
   if (view !== state.viewId) return; // screen was cleared; reply is in chat.md
   if (!r.ok && !$("chat-input").value) $("chat-input").value = q; // ready to resend
-  addChat("assistant", r.ok ? data.answer : (data.error || "エラーが発生しました"));
+  const reply = addChat("assistant", r.ok ? data.answer : (data.error || "エラーが発生しました"));
+  if (r.ok) offerWeb(reply, q, target);
 });
+
+// Searching is opt-in: it costs money and leaves the transcript's facts
+function offerWeb(el, question, target) {
+  if (!state.webOk || !question) return;
+  const b = document.createElement("button");
+  b.className = "ghost-btn web-btn";
+  b.textContent = "🌐 Webで調べる";
+  el.appendChild(document.createElement("br"));
+  el.appendChild(b);
+  b.onclick = async () => {
+    const view = state.viewId;
+    b.disabled = true;
+    b.textContent = "検索中…";
+    let r = { ok: false }, d = {};
+    try {
+      r = await fetch(`/api/sessions/${target.date}/${target.dirname}/web-search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      d = await r.json();
+    } catch {}
+    if (view !== state.viewId) return;
+    if (!r.ok) { b.disabled = false; b.textContent = d.error || "失敗しました。もう一度"; return; }
+    b.remove();
+    const w = addChat("web", d.answer);
+    el.after(w); // keep it next to the answer it supplements
+    w.scrollIntoView({ block: "nearest" });
+  };
+}
 
 function addChat(cls, text) {
   const log = $("chat-log");
   const div = document.createElement("div");
   div.className = `chat-msg ${cls}`;
-  div.textContent = text;
+  if (cls === "web") {
+    const head = document.createElement("div");
+    head.className = "web-head";
+    head.textContent = "🌐 Webの情報(発言内容ではありません)";
+    div.appendChild(head);
+    for (const line of text.split("\n")) {
+      const row = document.createElement(/^https?:\/\/\S+$/.test(line) ? "a" : "div");
+      row.textContent = line;
+      if (row.tagName === "A") { row.href = line; row.target = "_blank"; row.rel = "noopener noreferrer"; }
+      div.appendChild(row);
+    }
+  } else div.textContent = text;
   log.appendChild(div);
   if (!state.recording) $("btn-clear").classList.remove("hidden");
   log.scrollTop = log.scrollHeight;

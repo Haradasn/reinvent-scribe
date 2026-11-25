@@ -126,3 +126,27 @@ def test_depleted_credits_are_reported_without_trying_other_models():
     c = client_with(handler)
     c.settings.llm_fallback_models = "backup"
     assert c.chat([]) is None and c.last_error == "payment" and len(n) == 1
+
+
+def test_openai_request_and_web_search_send_only_the_question():
+    import json
+    got = []
+
+    def handler(request):
+        b = json.loads(request.content)
+        got.append(b)
+        if request.url.path.endswith("/responses"):
+            return httpx.Response(200, json={"status": "completed", "output": [
+                {"type": "web_search_call"}, {"type": "message", "content": [{
+                    "type": "output_text", "text": "答え。([a](https://a.com))",
+                    "annotations": [{"title": "A", "url": "https://a.com/?utm_source=openai"},
+                                    {"title": "B", "url": "javascript:x"}]}]}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    c = client_with(handler)
+    c.settings.llm_base_url, c.settings.llm_model = "https://api.openai.com/v1", "gpt-6-luna"
+    assert c.chat([]) == "ok"
+    assert got[0]["reasoning_effort"] == "none" and "max_tokens" not in got[0]
+    assert c.web_search("質問") == ("答え。", [{"title": "A", "url": "https://a.com/"}])
+    assert got[1]["input"].endswith("質問") and got[1]["store"] is False
+    assert LLMClient(settings()).can_search() is False

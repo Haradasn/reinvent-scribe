@@ -345,3 +345,8 @@ a.memo-btn { color: var(--accent2); opacity: 0.9; text-decoration: none; font-si
 .mail-box .check input { width: auto; }
 #mail-note { color: var(--muted); font-size: 0.8rem; }
 .sync-note + .ghost-btn { margin: 0 8px; }
+
+.chat-msg.web { align-self: flex-start; background: rgba(56,212,255,0.08); border: 1px solid rgba(56,212,255,0.35); overflow-wrap: anywhere; }
+.chat-msg.web a { color: var(--accent2); display: block; }
+.web-head { color: var(--accent2); font-size: 0.75rem; margin-bottom: 4px; }
+.web-btn { margin-top: 8px; font-size: 0.78rem; }

@@ -111,7 +111,7 @@ class Session:
         path = self.dir / "chat.md"
         if not path.exists():
             return []
-        parts = re.split(r"^\*\*(user|assistant)\*\*: ",
+        parts = re.split(r"^\*\*(user|assistant|web)\*\*: ",
                          path.read_text(encoding="utf-8"), flags=re.M)
         return [{"role": r, "content": t.strip()}
                 for r, t in zip(parts[1::2], parts[2::2])]

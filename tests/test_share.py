@@ -116,3 +116,19 @@ def test_summary_download(tmp_path):
         (tmp_path / date / name / "summary.md").write_text("要点です", encoding="utf-8")
         assert "[K] t" in c.get(url).text and "要点です" in c.get(url).text
         assert c.get(f"/api/sessions?date={date}").json()["sessions"][0]["summary"] is True
+
+
+def test_web_answers_are_saved_apart_from_chat(tmp_path):
+    class Web(FakeLLM):
+        def can_search(self): return True
+        def web_search(self, q): return "答え", [{"title": "A", "url": "https://a.com"}]
+
+    app = server.create_app(settings=Settings(data_dir=tmp_path), mic_factory=FakeMic,
+                            transcriber_factory=FakeTranscriber,
+                            transcribe_file_fn=fake_transcribe_file, llm=Web(),
+                            model_name="x", streamer_factory=None)
+    with TestClient(app) as c:
+        date, name = record(c)
+        r = c.post(f"/api/sessions/{date}/{name}/web-search", json={"question": "q"})
+        assert "https://a.com" in r.json()["answer"]
+        assert c.get(f"/api/sessions/{date}/{name}").json()["chat"][0]["role"] == "web"

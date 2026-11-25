@@ -474,6 +474,22 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         session.append_chat("assistant", answer)
         return {"answer": answer}
 
+    @app.post("/api/sessions/{date}/{dirname}/web-search")
+    def web_search(date: str, dirname: str, body: ChatBody):
+        session = _get_session(date, dirname)
+        if not getattr(llm, "can_search", lambda: False)():
+            return JSONResponse({"error": "Web検索には OpenAI の設定が必要です。"}, status_code=503)
+        found = llm.web_search(body.question)
+        if found is None:
+            return JSONResponse({"error": "Web検索に失敗しました。もう一度お試しください。"},
+                                status_code=502)
+        text, sources = found
+        lines = [text] + (["", "出典:"] + [f"{x['title']}\n{x['url']}" for x in sources]
+                          if sources else ["", "(出典なし)"])
+        answer = "\n".join(lines)
+        session.append_chat("web", answer)
+        return {"answer": answer}
+
     @app.post("/api/daily-report")
     def daily_report(date: str, body: ReportBody | None = None):
         _check_date(date)
@@ -581,6 +597,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 "paused": rec.paused if rec else False,
                 "mic_ok": state["mic_ok"], "llm_ok": llm.available(),
                 "mail_ok": bool(settings.gmail_address and settings.gmail_app_password),
+                "web_ok": getattr(llm, "can_search", lambda: False)(),
                 "llm_error": getattr(llm, "last_error", None),
                 "stt": None if rec is None else
                        "online" if rec.engine["streamer"] else "local",

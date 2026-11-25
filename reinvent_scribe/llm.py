@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 import httpx
@@ -12,6 +13,8 @@ _TAIL_CHARS = 6000
 
 # tried in order when the configured model is overloaded (503/429/timeout)
 _GEMINI_FALLBACKS = "gemini-3.6-flash,gemini-3.5-flash"
+_OPENAI_FALLBACKS = "gpt-5.6-luna,gpt-4o-mini"
+_OPENAI_REASONING = re.compile(r"gpt-(5\.\d|[6-9])")
 _PREFER_SEC = 120
 
 
@@ -43,11 +46,57 @@ class LLMClient:
         self.last_error = last_error
         return None
 
+    def _is_openai(self) -> bool:
+        return httpx.URL(self.settings.llm_base_url or "").host == "api.openai.com"
+
+    def can_search(self) -> bool:
+        return self.available() and self._is_openai()
+
+    def web_search(self, question: str) -> tuple[str, list[dict]] | None:
+        """Answer from the web. Only the question is sent, never a transcript."""
+        s = self.settings
+        for model in self._model_order():
+            body = {"model": model, "store": False, "max_output_tokens": 4000,
+                    "tools": [{"type": "web_search"}], "tool_choice": "required",
+                    "input": "Web検索し、日本語で簡潔に(4文以内)答えてください。"
+                             "確認できないことは「確認できませんでした」と書くこと。\n\n" + question}
+            if _OPENAI_REASONING.match(model):
+                body["reasoning"] = {"effort": "none"}
+            try:
+                resp = self._client.post(
+                    s.llm_base_url.rstrip("/") + "/responses", json=body, timeout=40,
+                    headers={"Authorization": f"Bearer {s.llm_api_key}"})
+                if resp.status_code != 200:
+                    log.warning("web search %s returned %d: %s", model,
+                                resp.status_code, resp.text[:300])
+                    if resp.status_code in (401, 402, 403):
+                        return None
+                    continue
+                data = resp.json()
+                if data.get("status") != "completed":
+                    continue
+                parts = [c for o in data["output"] if o["type"] == "message"
+                         for c in o["content"] if c.get("type") == "output_text"]
+                text = "".join(c["text"] for c in parts)
+                text = re.sub(r"\s*\(\[[^\]]*\]\([^)]*\)\)", "", text).strip()
+                sources = {}
+                for c in parts:
+                    for a in c.get("annotations", []):
+                        url = re.sub(r"[?&]utm_source=openai", "", a.get("url", ""))
+                        if url.startswith(("https://", "http://")):
+                            sources[url] = " ".join((a.get("title") or url).split())
+                if text:
+                    return text, [{"title": t, "url": u} for u, t in sources.items()]
+            except Exception as e:
+                log.warning("web search failed: %r", e)
+        return None
+
     def _models(self) -> list[str]:
         s = self.settings
         extra = s.llm_fallback_models
         if extra is None:
-            extra = _GEMINI_FALLBACKS if "googleapis.com" in s.llm_base_url else ""
+            extra = (_GEMINI_FALLBACKS if "googleapis.com" in s.llm_base_url
+                     else _OPENAI_FALLBACKS if self._is_openai() else "")
         names = [s.llm_model, *(m.strip() for m in extra.split(","))]
         return list(dict.fromkeys(m for m in names if m))
 
@@ -67,6 +116,11 @@ class LLMClient:
             # Gemini counts hidden thinking against max_tokens, which would
             # cut the visible answer short.
             body.update(max_tokens=max(max_tokens, 8192), reasoning_effort="low")
+        elif self._is_openai():
+            del body["max_tokens"]
+            body["max_completion_tokens"] = max(max_tokens, 8192)
+            if _OPENAI_REASONING.match(model):
+                body["reasoning_effort"] = "none"  # captions need speed
         try:
             resp = self._client.post(
                 s.llm_base_url.rstrip("/") + "/chat/completions",
@@ -111,6 +165,6 @@ def transcript_chat(llm: LLMClient, transcript: str, history: list[dict],
         "日本語で簡潔に答えてください。\n\n---\n"
         + _clip_transcript(transcript)
     )
-    messages = [{"role": "system", "content": system}, *history,
+    messages = [{"role": "system", "content": system}, *[m for m in history if m["role"] in ("user", "assistant")],
                 {"role": "user", "content": question}]
     return llm.chat(messages)
