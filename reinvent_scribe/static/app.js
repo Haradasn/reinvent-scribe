@@ -8,7 +8,6 @@ const state = {
   selected: null, // chat target {dirname, date}
   viewId: 0, // bumped on clear; late replies for an older view are dropped
   viewing: false, // showing a saved recording
-  cleared: false, // ignore late captions after the user cleared the screen
 };
 
 // Local date, not UTC: the server names day folders by local time
@@ -118,7 +117,7 @@ function connectWS() {
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === "level") return onLevel(msg);
-    if ((state.cleared || state.viewing) && ["segment", "partial", "jp", "jp_failed", "summary"].includes(msg.type)) return;
+    if (state.viewing && ["segment", "partial", "jp", "jp_failed", "summary"].includes(msg.type)) return;
     if (msg.type.startsWith("jp") && msg.dirname !== state.current?.dirname) return;
     if (msg.type === "jp_failed") { const p = pendingJp(msg.ts); if (p) p.textContent = "訳せませんでした(英語は保存済み)"; }
     if (msg.type === "segment") { clearPartial(); addCaption(msg.ts, msg.text, msg.translating); }
@@ -423,14 +422,9 @@ function setRecorderUI(mode) {
   $("btn-record").title = { idle: "録音開始", recording: "一時停止", paused: "再開" }[mode];
   $("btn-stop").classList.toggle("hidden", mode === "idle");
   $("rec-timer").classList.toggle("paused", mode === "paused");
-  $("btn-clear").classList.toggle("hidden", mode !== "idle" || !hasContent());
 }
 
 /* ---------- clear screen (files on disk are untouched) ---------- */
-function hasContent() {
-  return !!document.querySelector(".caption, .summary-card, .chat-msg");
-}
-
 function setPlaceholder(id, text) {
   const div = document.createElement("div");
   div.className = "captions-empty";
@@ -453,13 +447,7 @@ function clearScreen() {
   $("chat-target").textContent = "";
   scrollToLatest(true);
   markSelected();
-  $("btn-clear").classList.add("hidden");
 }
-
-$("btn-clear").addEventListener("click", () => {
-  state.cleared = true;
-  clearScreen();
-});
 
 $("btn-record").addEventListener("click", async () => {
   if (state.recording && !state.paused) {
@@ -536,7 +524,6 @@ async function doStart(payload) {
   level.warning = null;
   level.at = performance.now();
   clearScreen();
-  state.cleared = false;
   state.recording = true;
   state.paused = false;
   state.current = { dirname: data.dirname, date: data.date };
@@ -712,7 +699,6 @@ async function openSession(date, dirname) {
   else clearSummary("この録音の要約はありません");
   $("captions").scrollTop = 0;
   showLatestBtn();
-  $("btn-clear").classList.remove("hidden");
 }
 
 /* ---------- memo ---------- */
@@ -915,7 +901,6 @@ function addChat(cls, text) {
     }
   } else div.textContent = text;
   log.appendChild(div);
-  if (!state.recording) $("btn-clear").classList.remove("hidden");
   log.scrollTop = log.scrollHeight;
   return div;
 }
