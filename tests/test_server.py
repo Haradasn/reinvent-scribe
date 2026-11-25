@@ -166,7 +166,7 @@ def test_glossary_edit_applies_to_next_recording(tmp_path, monkeypatch):
     import reinvent_scribe.server as srv
     gl = tmp_path / "g.txt"
     gl.write_text("Kiro\n")
-    monkeypatch.setattr(srv, "GLOSSARY", gl)
+    monkeypatch.setattr(srv, "GLOSSARY", [tmp_path / "mine.txt", gl])
     prompts = []
 
     class T(FakeTranscriber):

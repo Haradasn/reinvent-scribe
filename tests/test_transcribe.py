@@ -107,3 +107,12 @@ def test_long_first_term_does_not_empty_whisper_prompt(tmp_path):
     path = tmp_path / "glossary.txt"
     path.write_text(" ".join(["w"] * 200) + "\nKiro\nKarpenter\n")
     assert load_glossary(path) == ("Kiro, Karpenter", True)
+
+
+def test_personal_glossary_comes_first(tmp_path):
+    from reinvent_scribe.transcribe import load_keyterms
+    mine, shared = tmp_path / "mine.txt", tmp_path / "shared.txt"
+    shared.write_text("Kiro\nKarpenter\n")
+    mine.write_text("AgentCore\nKiro\n")
+    assert load_keyterms([mine, shared]) == ["AgentCore", "Kiro", "Karpenter"]
+    assert load_keyterms([tmp_path / "none.txt", shared]) == ["Kiro", "Karpenter"]

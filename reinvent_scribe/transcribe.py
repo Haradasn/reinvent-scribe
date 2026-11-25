@@ -11,16 +11,20 @@ log = logging.getLogger(__name__)
 _MAX_PROMPT_WORDS = 170
 
 
-def _glossary_terms(path: Path) -> list[str]:
-    """One term per line; blank lines and # comments are skipped."""
-    path = Path(path)
-    if not path.exists():
-        return []
+def _glossary_terms(path) -> list[str]:
+    """One term per line; blank lines and # comments are skipped.
+
+    path may be a list: earlier files come first (personal list, then shared).
+    """
     terms = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and line not in terms:
-            terms.append(line)
+    for p in (path if isinstance(path, (list, tuple)) else [path]):
+        p = Path(p)
+        if not p.exists():
+            continue
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and line not in terms:
+                terms.append(line)
     return terms
 
 
@@ -36,7 +40,7 @@ def load_glossary(path: Path) -> tuple[str, bool]:
             continue  # a shorter term later may still fit
         kept.append(t)
     if truncated:
-        log.warning("glossary.txt exceeds ~224 tokens; using the first %d terms",
+        log.info("glossary exceeds ~224 tokens; Whisper uses the first %d terms",
                     len(kept))
     return ", ".join(kept), truncated
 
@@ -57,7 +61,7 @@ def load_keyterms(path: Path) -> list[str]:
             terms += [w for w in t.split()
                       if w not in terms and len(w) <= _MAX_KEYTERM_CHARS]
     if len(terms) > _MAX_KEYTERMS:
-        log.warning("glossary.txt has %d terms; AssemblyAI gets the first %d",
+        log.info("glossary has %d terms; AssemblyAI gets the first %d",
                     len(terms), _MAX_KEYTERMS)
     return terms[:_MAX_KEYTERMS]
 

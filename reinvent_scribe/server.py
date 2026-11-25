@@ -36,7 +36,8 @@ log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 SCHEDULE_CSV = Path("sessions.csv")
 DETAILS_JSON = "sessions.details.json"  # next to the csv
-GLOSSARY = Path("glossary.txt")
+# personal terms (not in Git) come first, then the shared list
+GLOSSARY = [Path("glossary.mine.txt"), Path("glossary.txt")]
 RECONNECT_SEC = 10
 END_UTTERANCE = object()  # queue marker: finalize captions on pause
 
