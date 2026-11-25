@@ -35,13 +35,13 @@ python -m reinvent_scribe
 ## 環境変数(要約・チャット・日報を使う場合)
 
 OpenAI 互換の Chat Completions API ならどこでも使えます。安いモデル推奨
-(gpt-4o-mini / Gemini Flash 級なら 1 セッション 1 時間の要約で数円以下)。
+(gpt-4o-mini / Gemini Flash 級なら 料金は必ず最新の単価を確認。目安: gemini-3.5-flash-lite で翻訳+3分ごとの要約が 1 時間 約$0.13)。
 
 ```bash
 export LLM_BASE_URL="https://api.openai.com/v1"
 export LLM_API_KEY="sk-..."
 export LLM_MODEL="gpt-4o-mini"
-export SUMMARY_INTERVAL_SEC=30    # 準リアルタイム要約の間隔(任意)
+export SUMMARY_INTERVAL_SEC=180   # 準リアルタイム要約の間隔(任意)
 export LLM_FALLBACK_MODELS="a,b"  # 任意: 混雑時に順に試すモデル(Gemini は既定あり、空文字で無効)
 export ASSEMBLYAI_API_KEY="..."   # 任意: 設定すると字幕が低遅延ストリーミングに
                                   # ($0.15/時〜。切断時はローカルに自動フォールバック)

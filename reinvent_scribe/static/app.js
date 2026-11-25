@@ -253,7 +253,7 @@ function setPlaceholder(id, text) {
 function clearScreen() {
   state.viewId++;
   setPlaceholder("captions", "録音を開始すると、ここに英語字幕が流れます");
-  setPlaceholder("summaries", "オンライン時、定期的に要約が更新されます");
+  setPlaceholder("summaries", "オンライン時、約3分ごとに要約が更新されます");
   $("chat-log").replaceChildren();
   $("chat-input").value = "";
   $("chat-input").placeholder = "文字起こしについて質問する…";

@@ -14,7 +14,7 @@ def test_from_env_defaults(monkeypatch, tmp_path):
     assert s.llm_base_url is None
     assert s.llm_api_key is None
     assert s.llm_model is None
-    assert s.summary_interval_sec == 30
+    assert s.summary_interval_sec == 180
 
 
 def test_from_env_overrides(monkeypatch):
