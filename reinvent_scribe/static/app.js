@@ -417,6 +417,10 @@ function escapeHtml(s) {
 // Main button: idle=start, recording=pause, paused=resume. Stop is its own button.
 function setRecorderUI(mode) {
   // mode: "idle" | "recording" | "paused"
+  // the browser tab shows whether this window is recording
+  $("favicon").href = { idle: "/static/favicon.svg", recording: "/static/favicon-rec.svg",
+                        paused: "/static/favicon-paused.svg" }[mode];
+  document.title = { idle: "", recording: "● 録音中 - ", paused: "一時停止中 - " }[mode] + "re:Invent Scribe";
   $("btn-record").dataset.state = mode;
   $("btn-record").classList.toggle("recording", mode === "recording");
   $("btn-record").title = { idle: "録音開始", recording: "一時停止", paused: "再開" }[mode];
