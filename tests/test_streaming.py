@@ -110,3 +110,25 @@ def test_no_streamer_factory_uses_local(tmp_path):
         c.post("/api/sessions/stop")
         text = (tmp_path / date / dirname / "transcript.md").read_text()
     assert "hello from fake" in text
+
+
+# --- feed buffering: AAI requires 50ms-1000ms chunks ---
+
+class SentWS:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, data):
+        self.sent.append(data)
+
+
+def test_feed_buffers_small_chunks():
+    s = AssemblyAIStreamer(api_key="k", on_segment=lambda ts, t: None)
+    s._ws = SentWS()
+    small = np.zeros(480, dtype=np.int16)  # 30ms @16k
+    s.feed(small)
+    assert s._ws.sent == []  # below 50ms: held back
+    s.feed(small)
+    s.feed(small)  # 90ms total -> flushed
+    assert len(s._ws.sent) == 1
+    assert len(s._ws.sent[0]) == 480 * 3 * 2  # bytes of int16

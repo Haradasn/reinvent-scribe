@@ -26,6 +26,10 @@ class AssemblyAIStreamer:
         self.on_partial = on_partial
         self._ws = None
         self._receiver: threading.Thread | None = None
+        self._buf = bytearray()
+
+    # AAI v3 rejects audio chunks shorter than 50ms; batch to >=80ms
+    _MIN_SEND_BYTES = int(16000 * 0.08) * 2
 
     def start(self) -> None:
         from websockets.sync.client import connect
@@ -41,8 +45,9 @@ class AssemblyAIStreamer:
             for message in self._ws:
                 if isinstance(message, str):
                     self._handle(message)
-        except Exception:
-            log.info("AssemblyAI receiver closed", exc_info=True)
+            log.warning("AssemblyAI connection closed by server")
+        except Exception as e:
+            log.warning("AssemblyAI receiver closed: %r", e)
 
     def _handle(self, message: str) -> None:
         try:
@@ -50,6 +55,8 @@ class AssemblyAIStreamer:
         except ValueError:
             return
         if msg.get("type") != "Turn":
+            if msg.get("type") not in ("Begin", "Termination"):
+                log.warning("AssemblyAI message: %s", message[:300])
             return
         transcript = (msg.get("transcript") or "").strip()
         if not transcript:
@@ -62,7 +69,10 @@ class AssemblyAIStreamer:
             self.on_partial(transcript)
 
     def feed(self, pcm: np.ndarray) -> None:
-        self._ws.send(np.asarray(pcm, dtype=np.int16).tobytes())
+        self._buf.extend(np.asarray(pcm, dtype=np.int16).tobytes())
+        if len(self._buf) >= self._MIN_SEND_BYTES:
+            data, self._buf = bytes(self._buf), bytearray()
+            self._ws.send(data)
 
     def stop(self) -> None:
         try:
