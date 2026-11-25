@@ -27,6 +27,9 @@ class FakeModel:
 
     def transcribe(self, audio, **kwargs):
         self.calls.append(kwargs)
+        if not hasattr(self, "calls_audio"):
+            self.calls_audio = []
+        self.calls_audio.append(audio)
         segs = [SimpleNamespace(start=s, end=s + 1.0, text=t)
                 for s, t in self._segments]
         return iter(segs), SimpleNamespace()

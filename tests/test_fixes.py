@@ -167,3 +167,20 @@ def test_delete_active_session_409(client):
     dirname, date = r.json()["dirname"], r.json()["date"]
     assert client.delete(f"/api/sessions/{date}/{dirname}").status_code == 409
     client.post("/api/sessions/stop")
+
+
+# --- HQ: decode WAV ourselves (PyAV incompatibility) ---
+
+def test_transcribe_file_passes_ndarray(tmp_path, monkeypatch):
+    import reinvent_scribe.transcribe as tr
+    import wave as wave_mod
+    from tests.test_transcribe import FakeModel
+    model = FakeModel([(0.0, " hi")])
+    monkeypatch.setattr(tr, "_load_model", lambda name: model)
+    wav = tmp_path / "a.wav"
+    with wave_mod.open(str(wav), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+        w.writeframes(np.zeros(16000, dtype=np.int16).tobytes())
+    tr.transcribe_file(wav, model_name="large-v3-turbo")
+    audio = model.calls_audio[0]
+    assert isinstance(audio, np.ndarray) and audio.dtype == np.float32

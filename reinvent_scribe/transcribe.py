@@ -26,9 +26,22 @@ def load_glossary(path: Path) -> tuple[str, bool]:
     return ", ".join(words), truncated
 
 
+_model_cache: dict = {}
+
+
 def _load_model(model_name: str):
-    from faster_whisper import WhisperModel
-    return WhisperModel(model_name, compute_type="int8")
+    if model_name not in _model_cache:
+        from faster_whisper import WhisperModel
+        _model_cache[model_name] = WhisperModel(model_name, compute_type="int8")
+    return _model_cache[model_name]
+
+
+def _read_wav(path: Path) -> np.ndarray:
+    """Load a 16kHz mono int16 WAV as float32, avoiding PyAV entirely."""
+    import wave
+    with wave.open(str(path), "rb") as w:
+        data = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+    return data.astype(np.float32) / 32768.0
 
 
 def pick_model(preferred: str = "small.en") -> str:
@@ -53,7 +66,7 @@ def pick_model(preferred: str = "small.en") -> str:
 class Transcriber:
     """Buffers 16kHz float32 PCM and emits confirmed segments via on_segment."""
 
-    CHUNK_SEC = 5.0
+    CHUNK_SEC = 3.0
 
     def __init__(self, model_name: str, initial_prompt: str,
                  on_segment: Callable[[float, str], None], model=None):
@@ -99,5 +112,5 @@ def transcribe_file(wav_path: Path, model_name: str = "large-v3-turbo",
     kwargs = dict(language="en", vad_filter=True)
     if initial_prompt:
         kwargs["initial_prompt"] = initial_prompt
-    segments, _ = model.transcribe(str(wav_path), **kwargs)
+    segments, _ = model.transcribe(_read_wav(Path(wav_path)), **kwargs)
     return [(seg.start, seg.text.strip()) for seg in segments if seg.text.strip()]
