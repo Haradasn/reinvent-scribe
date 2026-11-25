@@ -613,23 +613,22 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         shutil.rmtree(_trashed(date, dirname).dir)
         return {"ok": True}
 
-    @app.get("/api/recording-days")
-    def recording_days():
-        days: dict[str, int] = {}
-        for s in store.all():
-            d = s.meta.get("schedule_date") or s.dir.parent.name
-            days[d] = days.get(d, 0) + 1
-        return {"days": days}
+    @app.get("/api/recordings")
+    def recordings():
+        return {"sessions": [{**_row(s), "day": s.meta.get("schedule_date")
+                              or s.dir.parent.name} for s in store.all()]}
+
+    def _row(s) -> dict:
+        return {"dirname": s.dir.name, "meta": s.meta,
+                "photos": len(photos.load(photos.folder(s))),
+                "summary": (s.dir / "summary.md").exists(),
+                "hq": (s.dir / "transcript_hq.md").exists()}
 
     @app.get("/api/sessions")
     def list_sessions(date: str):
         _check_date(date)
         sessions = store.list_for_date(date)
-        return {"sessions": [
-            {"dirname": s.dir.name, "meta": s.meta,
-             "photos": len(photos.load(photos.folder(s))),
-             "summary": (s.dir / "summary.md").exists(),
-             "hq": (s.dir / "transcript_hq.md").exists()} for s in sessions]}
+        return {"sessions": [_row(s) for s in sessions]}
 
     @app.post("/api/sessions/{date}/{dirname}/chat")
     def chat(date: str, dirname: str, body: ChatBody):

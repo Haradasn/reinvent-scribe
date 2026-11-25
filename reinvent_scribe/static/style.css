@@ -558,3 +558,22 @@ button.rec-open { cursor: pointer; }
 .rec-row.nested .rec-open { min-height: 44px; }
 .rec-row.nested .rec-name { font-size: 0.8rem; }
 .day-scroll .row-menu[open] { z-index: 30; }
+
+/* ---- every day in one list ---- */
+.day-tab[aria-current="true"] { color: var(--text); border-color: var(--accent); background: rgba(124,108,255,0.25); }
+.day-title { position: sticky; top: 0; z-index: 5; margin: 0 0 6px; padding: 7px 4px; font-size: 0.85rem; background: #171c38; border-bottom: 1px solid var(--border); }
+.day-title.today { color: var(--accent2); }
+.day-section { padding-bottom: 14px; }
+.day-section:last-child { min-height: 100%; }
+.agenda-main { cursor: default; }
+.agenda-main:hover { background: none; }
+.agenda-title { display: block; overflow: visible; }
+.agenda-venue { white-space: normal; overflow: visible; }
+.agenda-row { position: relative; }
+.agenda-row.flash { outline: 2px solid var(--accent2); }
+.try-btn { position: absolute; right: 8px; bottom: 6px; padding: 5px 12px; min-height: 32px; border-radius: 999px; border: 1px solid var(--border); background: #232b56; color: var(--text); font: inherit; font-size: 0.74rem; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+.agenda-row:hover .try-btn, .agenda-row:focus-within .try-btn, .agenda-row.next .try-btn { opacity: 1; }
+.agenda-row.next .try-btn { position: static; margin: 0 10px 10px; min-height: 40px; border-radius: 10px; }
+@media (hover: none) { .try-btn { opacity: 1; position: static; margin-right: 8px; } }
+.rest-title { font-size: 0.75rem; color: var(--muted); margin: 10px 2px 6px; }
+.row-menu[open] { z-index: 30; }

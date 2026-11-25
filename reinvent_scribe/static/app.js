@@ -42,7 +42,7 @@ function syncRecordingState(s) {
     state.recording = true;
     state.current = { dirname: s.session.dirname, date: s.session.date };
     state.currentMeta = s.session.meta;
-    setDate(s.session.meta.schedule_date || s.session.date);
+    loadSessions().then(() => jumpTo(dayBox.querySelector(".agenda-row.live"), 60));
     state.selected = state.current;
     state.startedAt = Date.parse(s.session.meta.started_at);
     clearInterval(state.timerId);
@@ -504,7 +504,7 @@ async function startRecording(payload) {
 function setBusy(on) {
   state.busy = on;
   renderHero();
-  renderDay();
+  renderList();
 }
 
 async function doStart(payload) {
@@ -535,8 +535,8 @@ async function doStart(payload) {
   state.currentMeta = data.meta;
   $("rec-title").textContent = label;
   $("chat-target").textContent = label;
-  setDate(data.meta.schedule_date || data.date);
-  loadSessions();
+  loadSessions().then(() => jumpTo(dayBox.querySelector(".agenda-row.live")
+    || dayBox.querySelector(`.rec-row[data-dirname="${CSS.escape(data.dirname)}"]`), 60));
   refreshStatus();
 }
 
@@ -577,48 +577,105 @@ async function stopRecording() {
 
 /* ---------- sessions ---------- */
 let listSeq = 0;
-const cal = { recs: [], days: {}, scrolled: null };
+const cal = { recs: [], sig: null, placed: false, jumpUntil: 0 };
+const dayBox = $("day-scroll");
 
 async function loadSessions() {
-  const date = $("list-date").value || today();
   const seq = ++listSeq;
-  let r, d;
+  let r;
   try {
-    [r, d] = await Promise.all([
-      fetch(`/api/sessions?date=${date}`).then((x) => x.json()),
-      fetch("/api/recording-days").then((x) => x.json()),
-    ]);
+    r = await (await fetch("/api/recordings")).json();
   } catch { return; }
   if (seq !== listSeq) return; // a newer request superseded this one
   cal.recs = r.sessions;
-  cal.days = d.days;
-  renderChips();
-  renderDay();
+  renderList();
 }
 
 const recsOf = (key) => cal.recs.filter((s) => s.meta.schedule_key === key);
+const listDays = () =>
+  [...new Set([...sched.items.map((i) => i.date), ...cal.recs.map((s) => s.day)])].sort();
 
-function renderDay() {
+/* Every day in one continuous list; the date buttons follow the scroll */
+function renderList() {
   // a row menu the user has open must not vanish under them
-  if (document.querySelector(".cal-panel .row-menu[open]")) return;
-  const date = $("list-date").value || today();
-  const plans = sched.items.filter((i) => i.date === date);
-  drawAgenda(plans);
-  if (cal.scrolled !== date && sched.base !== undefined) {
-    cal.scrolled = date;
-    const now = $("cal-day").querySelector(".agenda-now");
-    $("day-scroll").scrollTop = now ? Math.max(0, now.offsetTop - $("cal-day").offsetTop - 60) : 0;
+  if (dayBox.querySelector(".row-menu[open]")) return;
+  const minute = sched.base === undefined ? 0 : Math.floor(nowMs() / 60000);
+  const sig = JSON.stringify([sched.items, cal.recs, state.recording, state.busy,
+    state.current?.dirname, minute]);
+  if (sig !== cal.sig) {
+    cal.sig = sig;
+    const keep = dayBox.scrollTop;
+    dayBox.replaceChildren(...listDays().map(daySection));
+    if (!dayBox.children.length) {
+      const p = document.createElement("div");
+      p.className = "agenda-empty";
+      p.textContent = "予定がありません。下の「予定を更新」で読み込めます";
+      dayBox.appendChild(p);
+    }
+    dayBox.scrollTop = keep;
   }
-  const keys = new Set(plans.map((p) => p.key));
-  const rest = cal.recs.filter((s) => !keys.has(s.meta.schedule_key));
-  const box = $("other-recs");
-  box.replaceChildren();
-  if (rest.length) {
-    const h = document.createElement("h3");
-    h.textContent = `${plans.length ? "予定以外の録音" : "録音"} ${rest.length}件`;
-    box.append(h, ...rest.map((s) => recordingRow(s)));
-  }
+  renderChips();
   markSelected();
+  if (!cal.placed && sched.base !== undefined && sched.items.length) {
+    cal.placed = true;
+    const at = dayBox.querySelector(".agenda-row.live, .agenda-row.next")
+      || dayBox.querySelector(".agenda-now");
+    if (at) jumpTo(at, 60, false);
+    else jumpTo(sectionOf(listDays().find((d) => d >= sched.today) || listDays().at(-1)), 0, false);
+  }
+}
+
+function daySection(date) {
+  const el = document.createElement("section");
+  el.className = "day-section";
+  el.dataset.date = date;
+  const plans = sched.items.filter((i) => i.date === date);
+  const recs = cal.recs.filter((s) => s.day === date);
+  const h = document.createElement("h3");
+  h.className = `day-title${date === sched.today ? " today" : ""}`;
+  h.textContent = `${dayLabel(date)}${date === sched.today ? " 今日" : ""}`;
+  el.appendChild(h);
+  drawAgenda(el, plans);
+  const keys = new Set(plans.map((p) => p.key));
+  const rest = recs.filter((s) => !keys.has(s.meta.schedule_key));
+  if (rest.length && plans.length) {
+    const t = document.createElement("div");
+    t.className = "rest-title";
+    t.textContent = "予定以外の録音";
+    el.appendChild(t);
+  }
+  el.append(...rest.map((s) => recordingRow(s)));
+  return el;
+}
+
+const sectionOf = (date) => dayBox.querySelector(`.day-section[data-date="${date}"]`);
+
+function jumpTo(el, margin = 0, smooth = true) {
+  if (!el) return;
+  cal.jumpUntil = performance.now() + (smooth ? 700 : 100);
+  const top = el.getBoundingClientRect().top - dayBox.getBoundingClientRect().top + dayBox.scrollTop;
+  dayBox.scrollTo({ top: top - margin, behavior: smooth ? "smooth" : "instant" });
+  const sec = el.closest(".day-section");
+  if (sec) showDay(sec.dataset.date);
+}
+
+function showDay(date) {
+  if ($("list-date").value === date) return;
+  $("list-date").value = date;
+  renderChips();
+}
+
+dayBox.addEventListener("scroll", () => {
+  if (performance.now() < cal.jumpUntil) return; // the clicked date stays lit on the way
+  const edge = dayBox.getBoundingClientRect().top + 40;
+  let cur = null;
+  for (const s of dayBox.querySelectorAll(".day-section"))
+    if (s.getBoundingClientRect().top <= edge) cur = s;
+  if (cur) showDay(cur.dataset.date);
+});
+
+function setDate(date) {
+  jumpTo(sectionOf(date));
 }
 
 const toMin = (hm) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3));
@@ -716,22 +773,16 @@ function statusOf(i) {
 }
 
 // The day as a plain list in time order: readable in a narrow full-height column
-function drawAgenda(plans) {
-  const box = $("cal-day");
-  box.replaceChildren();
-  if (!plans.length) {
-    const p = document.createElement("div");
-    p.className = "agenda-empty";
-    p.textContent = "この日の予定はありません";
-    box.appendChild(p);
-    return;
-  }
+function drawAgenda(box, plans) {
+  if (!plans.length) return;
   let marked = plans[0].date !== sched.today;
   const next = sched.base === undefined || state.recording ? [] : candidates().map((i) => i.key);
   for (const i of plans) {
     const past = sched.base !== undefined && evMs(i.date, i.end) < nowMs();
-    const open = !past && evMs(i.date, i.start) <= nowMs();
+    const isToday = i.date === sched.today;
+    const open = isToday && !past && evMs(i.date, i.start) <= nowMs();
     const live = state.recording && state.currentMeta?.schedule_key === i.key;
+    const recs = recsOf(i.key);
     if (!marked && !past) {
       marked = true;
       const n = document.createElement("div");
@@ -739,29 +790,31 @@ function drawAgenda(plans) {
       n.textContent = `現在 ${new Date(nowMs()).toISOString().slice(11, 16)}`;
       box.appendChild(n);
     }
+    const isNext = next.includes(i.key);
     const clash = plans.some((o) => o !== i && o.start < i.end && i.start < o.end);
     const row = document.createElement("div");
-    row.className = `agenda-row ${["reserved", "favorite"].includes(i.kind) ? i.kind : "personal"}${past ? " past" : ""}${live ? " live" : open ? " open" : ""}`;
+    row.className = `agenda-row ${["reserved", "favorite"].includes(i.kind) ? i.kind : "personal"}` +
+      `${past ? " past" : ""}${live ? " live" : open ? " open" : ""}${isNext ? " next" : ""}`;
+    row.dataset.key = i.key;
     row.innerHTML =
-      `<button class="agenda-main"><span class="agenda-time">${escapeHtml(i.start)}<small>${escapeHtml(i.end)}</small></span>` +
+      `<div class="agenda-main"><span class="agenda-time">${escapeHtml(i.start)}<small>${escapeHtml(i.end)}</small></span>` +
       `<span class="agenda-body"><span class="agenda-title">${escapeHtml(i.title)}</span>` +
       (i.venue ? `<span class="agenda-venue">${escapeHtml(i.venue)}</span>` : "") +
-      `<span class="agenda-tags">${statusOf(i)}${KIND[i.kind] ? `<span class="tag">${KIND[i.kind]}</span>` : ""}${clash ? '<span class="tag">時間が重複</span>' : ""}</span></span></button>`;
-    row.firstChild.onclick = () => openPlan(i);
-    if (i.date === sched.today && !past && !state.recording) {
+      `<span class="agenda-tags">${statusOf(i)}${KIND[i.kind] ? `<span class="tag">${KIND[i.kind]}</span>` : ""}${clash ? '<span class="tag">時間が重複</span>' : ""}</span></span></div>`;
+    if (!past && !state.recording) {
       const b = document.createElement("button");
-      const isNext = next.includes(i.key);
-      b.className = isNext ? "primary-btn" : "row-rec";
-      b.textContent = state.busy ? "処理中…" : isNext ? `● 録音開始(${until(evMs(i.date, i.start) - nowMs())})` : "録音";
-      if (isNext) row.classList.add("next");
-      b.setAttribute("aria-label", `${i.title} を録音`);
+      b.className = !isToday ? "try-btn" : isNext ? "primary-btn" : "row-rec";
+      b.textContent = !isToday ? "試し録り" : state.busy ? "処理中…"
+        : isNext ? `● 録音開始(${until(evMs(i.date, i.start) - nowMs())})` : "録音";
+      b.setAttribute("aria-label", `${i.title} を${isToday ? "録音" : "試し録り"}`);
+      if (!isToday) b.title = "当日(現地)になると「録音」に変わります";
       b.disabled = !!state.busy;
       b.onclick = () => startItem(i);
       row.appendChild(b);
     }
     box.appendChild(row);
     // its recordings belong right under the session
-    for (const s of recsOf(i.key)) box.appendChild(recordingRow(s, true));
+    for (const s of recs) box.appendChild(recordingRow(s, true));
   }
 }
 
@@ -782,44 +835,18 @@ function eventBlock({ i, from, to, col, cols }, lo, scale) {
     (KIND[i.kind] ? `<span class="tag">${KIND[i.kind]}</span>` : "") + statusOf(i) + "</div>" +
     `<div class="ev-title">${escapeHtml(i.title)}</div>` +
     (i.venue ? `<div class="ev-venue">${escapeHtml(i.venue)}</div>` : "");
-  el.onclick = () => openPlan(i);
+  const show = () => {
+    $("week-modal").close();
+    const row = dayBox.querySelector(`.agenda-row[data-key="${CSS.escape(i.key)}"]`);
+    jumpTo(row, 60);
+    row?.classList.add("flash");
+    setTimeout(() => row?.classList.remove("flash"), 1600);
+  };
+  el.onclick = show;
   el.onkeydown = (e) => {
-    if (e.target === el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openPlan(i); }
+    if (e.target === el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); show(); }
   };
   return el;
-}
-
-function closeCalendars() {
-  for (const id of ["plan-modal", "week-modal"]) if ($(id).open) $(id).close();
-}
-
-async function openPlan(i) {
-  let recs = recsOf(i.key);
-  if (i.date !== $("list-date").value) { // from the week view
-    try {
-      recs = (await (await fetch(`/api/sessions?date=${i.date}`)).json()).sessions
-        .filter((s) => s.meta.schedule_key === i.key);
-    } catch { recs = []; }
-  }
-  $("plan-title").textContent = i.title;
-  $("plan-info").textContent = [`${dayLabel(i.date)} ${i.start}–${i.end}(現地)`, i.venue, KIND[i.kind] || "予約済み"]
-    .filter(Boolean).join("\n");
-  const box = $("plan-recs");
-  box.replaceChildren();
-  if (recs.length) {
-    const h = document.createElement("h3");
-    h.textContent = `録音 ${recs.length}件`;
-    box.append(h, ...recs.map((s) => recordingRow(s)));
-  }
-  const isToday = i.date === sched.today;
-  const go = $("plan-go");
-  go.textContent = isToday ? "● 録音開始" : "試し録り";
-  go.className = isToday ? "primary-btn" : "ghost-btn";
-  go.disabled = state.recording || !!state.busy;
-  go.onclick = () => { closeCalendars(); startItem(i); };
-  $("plan-note").textContent = state.recording ? "録音中です" : isToday ? ""
-    : "当日(現地)になると「録音開始」に変わります";
-  $("plan-modal").showModal();
 }
 
 for (const b of document.querySelectorAll("[data-close]"))
@@ -857,7 +884,7 @@ function recordingRow(s, nested) {
     (active ? "" : '<button class="m-del">ゴミ箱に移動</button>') + "</div></details>";
   const menu = el.querySelector(".row-menu");
   menu.querySelector(".menu").addEventListener("click", () => { menu.open = false; });
-  el.querySelector(".rec-open").onclick = () => { closeCalendars(); openSession(day, s.dirname); };
+  el.querySelector(".rec-open").onclick = () => { openSession(day, s.dirname); };
   el.querySelector(".m-memo").onclick = () => openMemo(s);
   const del = el.querySelector(".m-del");
   if (del) del.onclick = async () => {
@@ -1395,14 +1422,8 @@ function mailPhotos() {
 }
 
 /* ---------- schedule ---------- */
-const sched = { items: [], now: null, today: null, initialized: false };
+const sched = { items: [], now: null, today: null };
 const KIND = { favorite: "お気に入り", personal: "自分の予定" };
-
-function setDate(date) {
-  $("list-date").value = date;
-  renderChips();
-  loadSessions();
-}
 
 // Event-local timestamps compared as UTC so the Mac's own timezone never matters
 const evMs = (date, time) => Date.parse(`${date}T${time}Z`);
@@ -1418,13 +1439,7 @@ async function refreshSchedule() {
   } catch {
     return;
   }
-  if (!sched.initialized) {
-    sched.initialized = true;
-    if (!state.recording && sched.items.length)
-      setDate(sched.items.find((i) => i.date >= sched.today)?.date || today());
-  }
-  renderChips();
-  renderDay();
+  renderList();
   renderHero();
 }
 
@@ -1471,20 +1486,15 @@ function dayLabel(date) {
 }
 
 function renderChips() {
-  const box = $("day-chips");
   const chosen = $("list-date").value;
-  const plans = {};
-  for (const i of sched.items) plans[i.date] = (plans[i.date] || 0) + 1;
-  const days = [...new Set([...Object.keys(plans), ...Object.keys(cal.days), today(), chosen])].filter(Boolean).sort();
-  box.replaceChildren(...days.map((date) => {
+  $("day-chips").replaceChildren(...listDays().map((date) => {
     const b = document.createElement("button");
     b.className = "day-tab";
-    b.setAttribute("role", "tab");
-    b.setAttribute("aria-selected", String(chosen === date));
-    const n = plans[date] ? `予定${plans[date]}` : "", m = cal.days[date] ? `録音${cal.days[date]}` : "";
+    b.setAttribute("aria-current", String(chosen === date));
     b.innerHTML = `<b>${dayLabel(date).replace("(", "<i>").replace(")", "</i>")}</b>`;
-    b.title = [n, m].filter(Boolean).join("・") || "予定なし";
-    if (cal.days[date]) b.classList.add("has-rec");
+    const n = sched.items.filter((i) => i.date === date).length, m = cal.recs.filter((s) => s.day === date).length;
+    b.title = [n && `予定${n}`, m && `録音${m}`].filter(Boolean).join("・");
+    if (m) b.classList.add("has-rec");
     b.onclick = () => setDate(date);
     return b;
   }));

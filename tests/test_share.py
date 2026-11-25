@@ -153,11 +153,11 @@ def test_delete_goes_to_trash_and_can_be_restored(tmp_path):
             pass
         url = f"/api/sessions/{date}/{name}"
         assert c.delete(url).status_code == 200
-        assert c.get(url).status_code == 404 and c.get("/api/recording-days").json()["days"] == {}
+        assert c.get(url).status_code == 404 and c.get("/api/recordings").json()["sessions"] == []
         assert c.get("/api/trash").json()["items"][0]["dirname"] == name
         assert c.post(f"/api/trash/{date}/{name}/restore").json()["dirname"] == name
         assert c.get(url + "/audio").status_code == 200
-        assert c.get("/api/recording-days").json()["days"] == {date: 1}
+        assert [x["day"] for x in c.get("/api/recordings").json()["sessions"]] == [date]
         c.delete(url)
         assert c.delete(f"/api/trash/{date}/nope").status_code == 404
         assert c.delete(f"/api/trash/{date}/{name}").status_code == 200

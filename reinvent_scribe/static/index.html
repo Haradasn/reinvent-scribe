@@ -35,10 +35,8 @@
       <button id="btn-week" class="link-btn">週で見る</button>
     </div>
     <input id="list-date" type="hidden">
-    <div id="day-chips" class="day-chips" role="tablist" aria-label="表示する日"></div>
+    <div id="day-chips" class="day-chips" role="navigation" aria-label="日付へ移動"></div>
     <div class="day-scroll" id="day-scroll">
-      <div id="cal-day" class="agenda"></div>
-      <div id="other-recs" class="other-recs"></div>
     </div>
     <div class="cal-foot">
       <button id="btn-unscheduled" class="link-btn">＋ 予定外の録音</button>
@@ -162,15 +160,6 @@
       </div>
     </details>
   </section>
-</dialog>
-
-<!-- One session: details and its recordings -->
-<dialog id="plan-modal" class="modal glass wide" aria-labelledby="plan-title">
-  <div class="modal-head"><h2 id="plan-title"></h2>
-    <button class="icon-btn" data-close aria-label="閉じる" title="閉じる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-  <p id="plan-info" class="plan-info"></p>
-  <div id="plan-recs" class="other-recs"></div>
-  <div class="modal-actions"><span id="plan-note" class="plan-note"></span><button id="plan-go" class="primary-btn"></button></div>
 </dialog>
 
 <!-- Whole week -->
