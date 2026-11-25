@@ -66,29 +66,39 @@ function setChip(id, text, ok) {
   el.className = `chip ${ok ? "ok" : "ng"}`;
 }
 
-/* ---------- waveform (visual pulse while recording) ---------- */
+/* ---------- input level (real microphone, newest on the right) ---------- */
 const canvas = $("waveform");
 const ctx = canvas.getContext("2d");
-let wavePhase = 0;
+const level = { bars: [], at: 0, warning: null };
+const BARS = 64;
+
+function onLevel(msg) {
+  // log scale: quiet speech (~100) and loud speech (~3000) both stay readable
+  level.bars.push(Math.min(1, Math.max(0.03, Math.log10(Math.max(msg.rms, 10) / 20) / 2.3)));
+  if (level.bars.length > BARS) level.bars.shift();
+  level.at = performance.now();
+  level.warning = msg.warning;
+}
+
 function drawWave() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (state.recording && !state.paused) {
-    ctx.beginPath();
-    for (let x = 0; x < canvas.width; x++) {
-      const t = x / canvas.width;
-      const env = Math.sin(Math.PI * t);
-      const y = canvas.height / 2 +
-        Math.sin(t * 18 + wavePhase) * env * (8 + Math.sin(wavePhase * 1.7) * 6);
-      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
-    const grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
-    grad.addColorStop(0, "#7c6cff");
-    grad.addColorStop(1, "#38d4ff");
-    ctx.strokeStyle = grad;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    wavePhase += 0.12;
+  const live = state.recording && !state.paused;
+  const silent = live && level.at && performance.now() - level.at > 3000;
+  if (live) {
+    const w = canvas.width / BARS;
+    ctx.fillStyle = level.warning || silent ? "#ffb454" : "#5ea8ff";
+    level.bars.forEach((v, i) => {
+      const h = v * canvas.height;
+      ctx.fillRect((BARS - level.bars.length + i) * w, (canvas.height - h) / 2, w - 2, h);
+    });
   }
+  const text = !live ? ""
+    : silent ? "マイクの音が届いていません。接続を確認してください"
+    : level.warning === "low" ? "音が小さいか、無音です。マイクを近づけてください"
+    : level.warning === "loud" ? "音が大きすぎて割れています。マイクを離してください" : "";
+  const box = $("level-warning");
+  if (box.textContent !== text) box.textContent = text;
+  box.classList.toggle("hidden", !text);
   requestAnimationFrame(drawWave);
 }
 drawWave();
@@ -107,6 +117,7 @@ function connectWS() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    if (msg.type === "level") return onLevel(msg);
     if ((state.cleared || state.viewing) && ["segment", "partial", "jp", "jp_failed", "summary"].includes(msg.type)) return;
     if (msg.type.startsWith("jp") && msg.dirname !== state.current?.dirname) return;
     if (msg.type === "jp_failed") { const p = pendingJp(msg.ts); if (p) p.textContent = "訳せませんでした(英語は保存済み)"; }
@@ -287,6 +298,7 @@ $("btn-record").addEventListener("click", async () => {
   if (state.recording && state.paused) {
     const r = await fetch("/api/sessions/resume", { method: "POST" });
     if (!r.ok) { alert("再開に失敗しました"); return; }
+    level.at = performance.now();
     state.paused = false;
     state.startedAt += Date.now() - state.pausedAt;
     state.timerId = setInterval(tick, 1000);
@@ -344,6 +356,9 @@ async function doStart(payload) {
     return;
   }
   const data = await r.json();
+  level.bars = [];
+  level.warning = null;
+  level.at = performance.now();
   clearScreen();
   state.cleared = false;
   state.recording = true;

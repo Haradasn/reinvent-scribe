@@ -22,3 +22,23 @@ def test_incomplete_second_pass_is_not_used(tmp_path):
     assert s.best_transcript().count("word") == 200
     (s.dir / "transcript_hq.md").write_text("better " * 200, encoding="utf-8")
     assert "better" in s.best_transcript()
+
+
+def test_level_meter_warns_on_quiet_and_clipping_only():
+    from reinvent_scribe.audio import LevelMeter
+
+    def run(meter, amp, sec):
+        t = np.arange(16000 * sec) / 16000
+        x = (np.sin(2 * np.pi * 200 * t) * amp).clip(-32768, 32767).astype(np.int16)
+        out = None
+        for i in range(0, len(x), 512):
+            out = meter.feed(x[i:i + 512]) or out
+        return out["warning"]
+
+    m = LevelMeter()
+    assert run(m, 100, 10) is None  # too early to judge
+    assert run(m, 100, 6) == "low"
+    assert run(m, 1000, 5) is None
+    assert run(m, 0, 5) is None  # a pause between sentences
+    assert run(m, 0, 16) == "low"
+    assert run(m, 200000, 5) == "loud"

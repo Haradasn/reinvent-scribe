@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .audio import MicStream, WavWriter
+from .audio import LevelMeter, MicStream, WavWriter
 from .config import Settings
 from .mail import build_message, send_gmail
 from .photos import MAX_BYTES, PhotoStore, read_photo, span, suggest
@@ -303,6 +303,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             # enqueues PCM. Transcription (local inference or network send)
             # runs on a dedicated worker thread so it can never stall capture.
             frame_queue: queue.Queue = queue.Queue()
+            meter = LevelMeter()
 
             def on_frames(frames: np.ndarray) -> None:
                 try:
@@ -310,6 +311,12 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                     frame_queue.put(frames)
                 except Exception:
                     log.exception("frame handling failed")
+                try:  # display only: must never affect the recording
+                    level = meter.feed(frames)
+                    if level:
+                        broadcast({"type": "level", **level})
+                except Exception:
+                    log.debug("level meter failed", exc_info=True)
 
             def _worker() -> None:
                 while True:

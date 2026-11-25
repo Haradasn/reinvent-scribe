@@ -1,4 +1,5 @@
 import struct
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,46 @@ class WavWriter:
         if not self._f.closed:
             self._write_header()
             self._f.close()
+
+
+class LevelMeter:
+    """Input level every 100ms, and whether speech is too quiet or clipping.
+
+    Judged on the loud part of the last 15s, so ordinary pauses between
+    sentences don't count. Thresholds come from real recordings: captions
+    lost words around 70 and were complete above about 160.
+    """
+
+    BLOCK, WINDOW = 1600, 150
+    LOW, LOW_CLEAR = 130, 180
+
+    def __init__(self):
+        self._buf = np.zeros(0, dtype=np.int16)
+        self._rms: deque = deque(maxlen=self.WINDOW)
+        self._clips: deque = deque(maxlen=self.WINDOW)
+        self.warning: str | None = None
+
+    def feed(self, frames: np.ndarray) -> dict | None:
+        self._buf = np.concatenate([self._buf, frames])
+        rms = None
+        while len(self._buf) >= self.BLOCK:
+            block = self._buf[:self.BLOCK].astype(np.float32)
+            self._buf = self._buf[self.BLOCK:]
+            rms = float(np.sqrt(np.mean(block ** 2)))
+            self._rms.append(rms)
+            self._clips.append(bool((np.abs(block) >= 32700).sum() >= 8))
+        if rms is None:
+            return None
+        loud = float(np.percentile(self._rms, 90))
+        if sum(self._clips) >= 15:
+            self.warning = "loud"
+        elif len(self._rms) < self.WINDOW:
+            self.warning = None
+        elif loud < (self.LOW_CLEAR if self.warning == "low" else self.LOW):
+            self.warning = "low"
+        else:
+            self.warning = None
+        return {"rms": round(rms), "warning": self.warning}
 
 
 class MicStream:
