@@ -458,12 +458,14 @@ function recordingRow(s) {
     (active ? "" :
       `<a class="memo-btn" title="音声をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/audio">♪⤓</a>` +
       `<a class="memo-btn" title="文字起こしをダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/transcript.txt">文字⤓</a>` +
-      (s.summary ? `<a class="memo-btn" title="日本語要約をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/summary.txt">要約⤓</a>` : "")) +
+      (s.summary ? `<a class="memo-btn" title="日本語要約をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/summary.txt">要約⤓</a>` : "") +
+      `<a class="memo-btn" title="記事用(文字起こし+写真)をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/article.zip">記事⤓</a>`) +
+    (s.photos ? `<span class="tag">📷${s.photos}</span>` : "") +
     `<button class="memo-btn memo-edit" title="メモ編集">✎</button>` +
     `<button class="memo-btn del-btn" title="削除">🗑</button>`;
   li.querySelector(".memo-edit").onclick = () => openMemo(s);
   li.querySelector(".del-btn").onclick = async () => {
-    if (!confirm(`[${s.meta.id}] ${s.meta.title} を削除しますか?(録音・文字起こしも消えます)`)) return;
+    if (!confirm(`[${s.meta.id}] ${s.meta.title} を削除しますか?(録音・文字起こし・写真も消えます)`)) return;
     const date = s.meta.started_at.slice(0, 10);
     const r = await fetch(`/api/sessions/${date}/${s.dirname}`, { method: "DELETE" });
     if (!r.ok) alert((await r.json().catch(() => ({}))).error || "削除に失敗しました");
@@ -505,12 +507,16 @@ async function openSession(date, dirname) {
   if (state.recording) return;
   state.viewing = true;
   $("rec-title").textContent = `[${d.meta.id}] ${d.meta.title}(保存済み)`;
-  if (d.segments.length) $("captions").replaceChildren();
+  if (d.segments.length || d.photos.length) $("captions").replaceChildren();
   else setPlaceholder("captions", "この録音の文字起こしはありません");
+  const shots = d.photos.slice();
   for (const s of d.segments) {
+    while (shots.length && shots[0].pos < s.ts) addPhoto(shots.shift(), date, dirname);
     addCaption(s.ts, s.text);
     if (s.ja) addJapanese(s.ts, s.ja);
   }
+  for (const p of shots) addPhoto(p, date, dirname);
+  if (d.photos.length) photoBar(d, date, dirname);
   if (d.summary) addSummary(d.summary, "保存済みの要約");
   else setPlaceholder("summaries", "この録音の要約はありません");
   $("captions").scrollTop = 0;
@@ -580,6 +586,7 @@ $("btn-regen").addEventListener("click", async () => {
     report.slack = data.slack;
     report.md = data.markdown;
     report.date = date;
+    loadMailPhotos(date);
     showReport();
   } catch {
     $("report-body").textContent = "生成に失敗しました";
@@ -604,7 +611,7 @@ $("btn-mail").addEventListener("click", async () => {
   // a leading Slack mention means nothing in an email
   const body = report.tab === "slack" ? report.slack.replace(/^@[^\n]*\n+/, "") : report.md;
   const attach = $("f-attach").checked;
-  if (!confirm(`${to} に ${report.date} の「${kind}」を送信しますか?${attach ? "\n(文字起こしを添付)" : ""}`)) return;
+  if (!confirm(`${to} に ${report.date} の「${kind}」を送信しますか?${attach ? "\n(文字起こしを添付)" : ""}${mailPhotos().length ? `\n(写真${mailPhotos().length}枚を添付。共有してよい写真か確認してください)` : ""}`)) return;
   try { localStorage.setItem("mailTo", to); } catch {}
   $("btn-mail").disabled = true;
   note.textContent = "送信中…";
@@ -612,7 +619,7 @@ $("btn-mail").addEventListener("click", async () => {
     const r = await fetch(`/api/daily-report/send?date=${report.date}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, subject: `re:Invent 出張日報 ${report.date}`, body, attach_transcript: attach }),
+      body: JSON.stringify({ to, subject: `re:Invent 出張日報 ${report.date}`, body, attach_transcript: attach, photos: mailPhotos() }),
     });
     const d = await r.json();
     note.textContent = r.ok ? `送信しました ✓${d.attachments ? `(添付 ${d.attachments}件)` : ""}` : d.error || "送信に失敗しました";
@@ -703,6 +710,249 @@ function addChat(cls, text) {
   if (!state.recording) $("btn-clear").classList.remove("hidden");
   log.scrollTop = log.scrollHeight;
   return div;
+}
+
+/* ---------- photos ---------- */
+const photoUrl = (date, dirname, id) =>
+  `/api/sessions/${date}/${encodeURIComponent(dirname)}/photos/${id}.jpg`;
+
+function addPhoto(p, date, dirname) {
+  const div = document.createElement("div");
+  div.className = "caption photo";
+  div.innerHTML = `<span class="ts">${p.taken ? fmtTs(p.pos) : "時刻なし"}</span>` +
+    `<button class="photo-btn" title="拡大"><img loading="lazy" alt="スライド写真" src="${photoUrl(date, dirname, p.id)}"></button>`;
+  if (p.text) {
+    const t = document.createElement("details");
+    const sum = document.createElement("summary");
+    sum.textContent = "スライドの読み取り";
+    const body = document.createElement("div");
+    body.className = "view-text";
+    body.textContent = p.text;
+    t.append(sum, body);
+    div.appendChild(t);
+  }
+  div.querySelector("button").onclick = () => viewPhoto(p, date, dirname);
+  capBox.appendChild(div);
+}
+
+// Tools for one recording's photos, shown above its captions
+function photoBar(d, date, dirname) {
+  const bar = document.createElement("div");
+  bar.className = "photo-bar";
+  const unread = d.photos.filter((p) => !p.text);
+  bar.innerHTML = `<span>写真 ${d.photos.length}枚・時刻補正</span>` +
+    `<button class="ghost-btn" data-s="-60">−1分</button><span class="shift"></span><button class="ghost-btn" data-s="60">+1分</button>` +
+    (unread.length ? `<button class="ghost-btn read-all">未読の${unread.length}枚をAIで読み取る</button>` : "") +
+    (d.photos.some((p) => p.text) ? `<button class="ghost-btn redo">写真を反映して要約を作り直す</button>` : "");
+  const redo = bar.querySelector(".redo");
+  if (redo) redo.onclick = async () => {
+    redo.disabled = true;
+    redo.textContent = "要約を作成中…";
+    let r = { ok: false }, x = {};
+    try {
+      r = await fetch(`/api/sessions/${date}/${encodeURIComponent(dirname)}/resummarize`, { method: "POST" });
+      x = await r.json();
+    } catch {}
+    redo.disabled = false;
+    redo.textContent = r.ok ? "写真を反映しました ✓" : x.error || "失敗しました";
+    if (r.ok && state.viewing && state.selected?.dirname === dirname) addSummary(x.summary, "写真を反映した要約");
+  };
+  const now = d.meta.photo_shift_sec || 0;
+  bar.querySelector(".shift").textContent = `${now > 0 ? "+" : ""}${now / 60}分`;
+  for (const b of bar.querySelectorAll("[data-s]")) b.onclick = async () => {
+    await fetch(`/api/sessions/${date}/${encodeURIComponent(dirname)}/photo-shift`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seconds: now + Number(b.dataset.s) }),
+    });
+    openSession(date, dirname);
+  };
+  const all = bar.querySelector(".read-all");
+  if (all) all.onclick = async () => {
+    if (!confirm(`${unread.length}枚の写真をAIサービスに送って読み取ります。送ってよい写真だけですか?`)) return;
+    all.disabled = true;
+    let failed = 0;
+    for (const [i, p] of unread.entries()) {
+      all.textContent = `読み取り中 ${i + 1}/${unread.length}`;
+      if (!(await readPhoto(p, date, dirname))) failed++;
+    }
+    if (failed) alert(`${failed}枚は読み取れませんでした`);
+    if (state.viewing && state.selected?.dirname === dirname) openSession(date, dirname);
+  };
+  capBox.prepend(bar);
+}
+
+async function readPhoto(p, date, dirname) {
+  try {
+    const r = await fetch(`/api/sessions/${date}/${encodeURIComponent(dirname)}/photos/${p.id}/read`, { method: "POST" });
+    if (!r.ok) return false;
+    p.text = (await r.json()).text;
+    return true;
+  } catch { return false; }
+}
+
+const recOptions = (recs) => {
+  const f = document.createDocumentFragment();
+  for (const r of recs) f.append(new Option(r.label, `${r.date}/${r.dirname}`));
+  return f;
+};
+const recValue = (v) => ({ date: v.slice(0, 10), dirname: v.slice(11) });
+
+async function viewPhoto(p, date, dirname) {
+  $("view-img").src = photoUrl(date, dirname, p.id);
+  $("view-text").textContent = p.text || "";
+  $("btn-view-read").disabled = false;
+  $("btn-view-read").textContent = p.text ? "もう一度AIで読み取る" : "AIで読み取る";
+  const box = await (await fetch("/api/photos/inbox")).json();
+  const sel = $("view-rec");
+  sel.replaceChildren(recOptions(box.recordings));
+  sel.value = `${date}/${dirname}`;
+  const refresh = () => { $("view-modal").close(); openSession(date, dirname); loadSessions(); };
+  sel.onchange = async () => {
+    const r = await fetch(`/api/sessions/${date}/${encodeURIComponent(dirname)}/photos/${p.id}/move`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(recValue(sel.value)),
+    });
+    if (!r.ok) alert("移動できませんでした");
+    refresh();
+  };
+  $("btn-view-del").onclick = async () => {
+    if (!confirm("この写真をアプリから削除しますか?(スマホの写真は消えません)")) return;
+    await fetch(photoUrl(date, dirname, p.id).replace(/\.jpg$/, ""), { method: "DELETE" });
+    refresh();
+  };
+  $("btn-view-read").onclick = async () => {
+    const b = $("btn-view-read");
+    b.disabled = true;
+    b.textContent = "読み取り中…";
+    const ok = await readPhoto(p, date, dirname);
+    b.disabled = false;
+    b.textContent = ok ? "もう一度AIで読み取る" : "失敗しました。もう一度";
+    $("view-text").textContent = p.text || "";
+  };
+  $("btn-view-close").onclick = refresh;
+  $("view-modal").showModal();
+}
+
+/* import: upload to the inbox, then confirm where each photo belongs */
+let uploading = false;
+const choice = {}; // id -> {on, rec}: survives re-rendering
+$("btn-photos").addEventListener("click", () => { $("photo-modal").showModal(); showInbox(); });
+$("btn-photo-close").addEventListener("click", () => $("photo-modal").close());
+$("photo-files").addEventListener("change", (e) => { uploadPhotos([...e.target.files]); e.target.value = ""; });
+// a stray drop must not navigate away from a running recording
+for (const ev of ["dragover", "drop"]) window.addEventListener(ev, (e) => e.preventDefault());
+window.addEventListener("drop", (e) => {
+  const files = [...(e.dataTransfer?.files || [])];
+  if (!files.length) return;
+  if (!$("photo-modal").open) $("photo-modal").showModal();
+  uploadPhotos(files);
+});
+
+async function uploadPhotos(files) {
+  if (uploading || !files.length) return;
+  uploading = true;
+  $("btn-photo-save").disabled = true;
+  let dup = 0;
+  const bad = [];
+  for (const [i, f] of files.entries()) {
+    $("photo-note").textContent = `読み込み中 ${i + 1}/${files.length}`;
+    try {
+      const r = await fetch(`/api/photos/upload?name=${encodeURIComponent(f.name)}`, { method: "POST", body: f });
+      const d = await r.json();
+      if (!r.ok) bad.push(f.name);
+      else if (d.duplicate) dup++;
+    } catch { bad.push(f.name); }
+  }
+  uploading = false;
+  await showInbox();
+  if (dup) $("photo-note").textContent += ` ・取り込み済み${dup}枚を省略`;
+  if (bad.length) $("photo-note").textContent += ` ・読めないファイル: ${bad.slice(0, 5).join("、")}${bad.length > 5 ? ` ほか${bad.length - 5}件` : ""}`;
+}
+
+async function showInbox() {
+  const box = await (await fetch("/api/photos/inbox")).json();
+  const grid = $("inbox-grid");
+  grid.replaceChildren();
+  const groups = [
+    ["録音中に撮影", (p) => p.suggest?.inside],
+    ["録音の前後10分(候補)", (p) => p.suggest && !p.suggest.inside],
+    ["未分類(選ばなければ保存しません)", (p) => !p.suggest],
+  ];
+  for (const [title, test] of groups) {
+    const list = box.items.filter(test);
+    if (!list.length) continue;
+    const h = document.createElement("h3");
+    h.textContent = `${title} ${list.length}枚`;
+    grid.appendChild(h);
+    for (const p of list) {
+      choice[p.id] ??= { on: !!p.suggest?.inside, rec: p.suggest ? `${p.suggest.date}/${p.suggest.dirname}` : "" };
+      const c = choice[p.id];
+      const card = document.createElement("div");
+      card.className = "inbox-card";
+      card.innerHTML = `<label><input type="checkbox"><img loading="lazy" alt="" src="/api/photos/inbox/${p.id}.jpg"></label>` +
+        `<div class="inbox-when">${p.when ? escapeHtml(p.when) + (p.zone_known ? "" : "(時差不明)") : "撮影時刻なし"}</div><select></select>`;
+      const ck = card.querySelector("input"), sel = card.querySelector("select");
+      sel.append(new Option("録音を選ぶ", ""), recOptions(box.recordings));
+      sel.value = c.rec;
+      ck.checked = c.on;
+      ck.onchange = () => { c.on = ck.checked; updateSave(box.items); };
+      sel.onchange = () => { c.rec = sel.value; c.on = ck.checked = !!sel.value; updateSave(box.items); };
+      grid.appendChild(card);
+    }
+  }
+  $("photo-note").textContent = box.items.length ? `確認待ち ${box.items.length}枚(時刻は ${box.timezone})` : "";
+  updateSave(box.items);
+}
+
+function updateSave(items) {
+  const n = items.filter((p) => choice[p.id].on && choice[p.id].rec).length;
+  const b = $("btn-photo-save");
+  b.disabled = uploading || !n;
+  b.textContent = `選択した${n}枚を保存`;
+  b.onclick = async () => {
+    const rest = items.length - n;
+    const picked = items.filter((p) => choice[p.id].on && choice[p.id].rec);
+    b.disabled = true;
+    const r = await fetch("/api/photos/commit", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: picked.map((p) => ({ id: p.id, ...recValue(choice[p.id].rec) })) }),
+    });
+    if (!r.ok) { alert("保存できませんでした"); return showInbox(); }
+    if (rest && confirm(`残りの${rest}枚を確認待ちから取り消しますか?(スマホの写真は消えません)`))
+      await fetch("/api/photos/inbox", { method: "DELETE" });
+    await showInbox();
+    $("photo-note").textContent = `${picked.length}枚を保存しました。録音を開くと字幕の間に表示されます`;
+    loadSessions();
+    const sel = state.selected;
+    if (!state.recording && sel) openSession(sel.date, sel.dirname);
+  };
+}
+
+$("btn-photo-clear").addEventListener("click", async () => {
+  if (uploading || !confirm("確認待ちの写真をすべて取り消しますか?(スマホの写真は消えません)")) return;
+  await fetch("/api/photos/inbox", { method: "DELETE" });
+  showInbox();
+});
+
+/* photos in the report mail: nothing is attached unless picked */
+async function loadMailPhotos(date) {
+  const grid = $("mail-photo-grid");
+  grid.replaceChildren();
+  $("mail-photo-count").textContent = "0";
+  const { sessions } = await (await fetch(`/api/sessions?date=${date}`)).json();
+  for (const s of sessions.filter((x) => x.photos)) {
+    const day = s.meta.started_at.slice(0, 10);
+    const d = await (await fetch(`/api/sessions/${day}/${encodeURIComponent(s.dirname)}`)).json();
+    for (const p of d.photos) {
+      const l = document.createElement("label");
+      l.innerHTML = `<input type="checkbox"><img loading="lazy" alt="スライド写真" src="${photoUrl(day, s.dirname, p.id)}">`;
+      Object.assign(l.firstChild.dataset, { date: day, dirname: s.dirname, id: p.id });
+      l.firstChild.onchange = () => ($("mail-photo-count").textContent = mailPhotos().length);
+      grid.appendChild(l);
+    }
+  }
+}
+function mailPhotos() {
+  return [...document.querySelectorAll("#mail-photo-grid input:checked")].map((i) => ({ ...i.dataset }));
 }
 
 /* ---------- schedule ---------- */

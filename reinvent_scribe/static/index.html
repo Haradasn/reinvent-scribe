@@ -80,6 +80,7 @@
       <input id="list-date" class="date-input" type="date" aria-label="表示する日付">
       <span id="sync-note" class="sync-note" role="status"></span>
       <button id="btn-sync" class="ghost-btn" title="re:Invent のカレンダーから予定を読み込む">⟳ 予定を更新</button>
+      <button id="btn-photos" class="ghost-btn">📷 写真を取り込む</button>
       <button id="btn-report" class="ghost-btn">日報生成</button>
     </div>
     <div id="day-chips" class="day-chips"></div>
@@ -113,6 +114,7 @@
   <div class="mail-box">
     <label>メール宛先 <input id="f-to" type="email" multiple placeholder="manager@example.com" autocomplete="off"></label>
     <label class="check"><input id="f-attach" type="checkbox"> 文字起こし(英語+日本語訳、テキスト)を添付</label>
+    <details id="mail-photos" class="mail-photos"><summary>写真を添付(<span id="mail-photo-count">0</span>枚選択)</summary><div id="mail-photo-grid" class="photo-grid"></div></details>
     <button id="btn-mail" class="primary-btn">Gmailで送信</button>
     <span id="mail-note" role="status"></span>
   </div>
@@ -120,6 +122,33 @@
     <button id="btn-regen" class="ghost-btn">生成する</button>
     <button id="btn-copy" class="primary-btn">コピー</button>
     <button id="btn-report-close" class="ghost-btn">閉じる</button>
+  </div>
+</dialog>
+
+<!-- Photo import -->
+<dialog id="photo-modal" class="modal glass photo-modal">
+  <h2>写真を取り込む</h2>
+  <label id="drop-zone" class="drop-zone">ここに写真をドロップ、またはクリックして選択(HEIC / JPEG / PNG)
+    <input id="photo-files" type="file" accept="image/*,.heic,.heif" multiple>
+  </label>
+  <p id="photo-note" class="photo-note" role="status"></p>
+  <div id="inbox-grid" class="inbox-grid"></div>
+  <div class="modal-actions">
+    <button id="btn-photo-clear" class="ghost-btn">すべて取り消す</button>
+    <button id="btn-photo-close" class="ghost-btn">あとで決める</button>
+    <button id="btn-photo-save" class="primary-btn" disabled>選択した写真を保存</button>
+  </div>
+</dialog>
+
+<!-- Photo viewer -->
+<dialog id="view-modal" class="modal glass photo-modal">
+  <img id="view-img" class="view-img" alt="スライド写真">
+  <div id="view-text" class="view-text"></div>
+  <label>紐付ける録音 <select id="view-rec"></select></label>
+  <div class="modal-actions">
+    <button id="btn-view-del" class="ghost-btn">写真を削除</button>
+    <button id="btn-view-read" class="ghost-btn">AIで読み取る</button>
+    <button id="btn-view-close" class="primary-btn">閉じる</button>
   </div>
 </dialog>
 

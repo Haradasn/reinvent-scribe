@@ -350,3 +350,26 @@ a.memo-btn { color: var(--accent2); opacity: 0.9; text-decoration: none; font-si
 .chat-msg.web a { color: var(--accent2); display: block; }
 .web-head { color: var(--accent2); font-size: 0.75rem; margin-bottom: 4px; }
 .web-btn { margin-top: 8px; font-size: 0.78rem; }
+
+/* ---- photos ---- */
+.photo-btn { border: 0; background: none; padding: 0; cursor: zoom-in; display: block; margin-top: 6px; }
+.photo-btn img { max-width: 100%; max-height: 260px; border-radius: 10px; display: block; }
+.photo details { margin-top: 8px; font-size: 0.85rem; color: var(--muted); }
+.photo-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 0.8rem; color: var(--muted); padding: 4px; }
+.modal.photo-modal { width: min(960px, 96vw); max-height: 92vh; overflow-y: auto; }
+.modal .drop-zone { display: block; border: 1px dashed var(--accent); border-radius: 14px; padding: 22px; text-align: center; cursor: pointer; color: var(--text); }
+.modal .drop-zone input { margin-top: 10px; }
+.photo-note { color: var(--muted); font-size: 0.82rem; margin: 8px 0; }
+.inbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; max-height: 48vh; overflow-y: auto; }
+.inbox-grid h3 { grid-column: 1 / -1; font-size: 0.85rem; margin-top: 6px; }
+.inbox-card { border: 1px solid var(--border); border-radius: 12px; padding: 8px; }
+.modal .inbox-card label, .modal .photo-grid label { position: relative; display: block; margin: 0; cursor: pointer; }
+.inbox-card img, .photo-grid img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; display: block; }
+.modal .inbox-card input, .modal .photo-grid input { position: absolute; top: 8px; left: 8px; width: 20px; height: 20px; margin: 0; }
+.inbox-when { font-size: 0.75rem; color: var(--muted); margin: 6px 0; }
+.modal select { width: 100%; padding: 7px; border-radius: 8px; border: 1px solid var(--border); background: #1a2145; color: var(--text); font: inherit; font-size: 0.75rem; }
+.view-img { max-width: 100%; max-height: 56vh; display: block; margin: 0 auto 12px; border-radius: 10px; }
+.view-text { white-space: pre-wrap; font-size: 0.85rem; line-height: 1.7; max-height: 24vh; overflow-y: auto; margin-bottom: 10px; }
+.mail-photos { flex: 1 1 100%; font-size: 0.8rem; color: var(--muted); }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; max-height: 180px; overflow-y: auto; margin-top: 8px; }
+#btn-photos { margin-right: 8px; }

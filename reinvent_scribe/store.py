@@ -1,7 +1,12 @@
 import json
+import os
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
+
+
+_meta_lock = threading.RLock()
 
 
 def _sanitize(session_id: str) -> str:
@@ -42,20 +47,31 @@ class Session:
         return cls(dir, meta)
 
     def _save_meta(self) -> None:
-        (self.dir / "meta.json").write_text(
+        tmp = self.dir / "meta.tmp"
+        tmp.write_text(
             json.dumps(self.meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, self.dir / "meta.json")
+
+    def update_meta(self, **values) -> None:
+        """Merge into the saved file: a memo edited while recording survives."""
+        with _meta_lock:
+            try:
+                self.meta = Session.load(self.dir).meta
+            except (OSError, ValueError):
+                pass
+            self.meta.update(values)
+            self._save_meta()
 
     def append_segment(self, ts_sec: float, text: str) -> None:
         with open(self.dir / "transcript.md", "a", encoding="utf-8") as f:
             f.write(f"[{_fmt_ts(ts_sec)}] {text}\n")
 
     def update_memo(self, memo: str) -> None:
-        self.meta["memo"] = memo
-        self._save_meta()
+        self.update_meta(memo=memo)
 
     def finalize(self, ended_at: datetime | None = None) -> None:
-        self.meta["ended_at"] = (ended_at or datetime.now()).isoformat()
-        self._save_meta()
+        ended = ended_at or datetime.now()
+        self.update_meta(ended_at=ended.isoformat(), ended_epoch=ended.timestamp())
 
     def transcript_text(self) -> str:
         path = self.dir / "transcript.md"

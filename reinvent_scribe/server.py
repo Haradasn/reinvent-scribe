@@ -5,13 +5,14 @@ import re
 import shutil
 import smtplib
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -20,10 +21,11 @@ from pydantic import BaseModel
 from .audio import MicStream, WavWriter
 from .config import Settings
 from .mail import build_message, send_gmail
+from .photos import MAX_BYTES, PhotoStore, read_photo, span, suggest
 from .schedule import load_schedule, save_schedule
 from .llm import LLMClient, transcript_chat
 from .store import SessionStore
-from .summarize import RollingSummarizer, build_daily_report, build_slack_post
+from .summarize import RollingSummarizer, build_daily_report, build_slack_post, summarize_whole
 from .transcribe import Transcriber, load_glossary, transcribe_file
 
 log = logging.getLogger(__name__)
@@ -54,6 +56,22 @@ class MailBody(BaseModel):
     subject: str
     body: str
     attach_transcript: bool = False
+    photos: list[dict] = []  # {date, dirname, id}
+
+
+class CommitBody(BaseModel):
+    items: list[dict]  # {id, date, dirname}
+
+
+class ShiftBody(BaseModel):
+    seconds: float
+
+
+class MoveBody(BaseModel):
+    date: str
+    dirname: str
+
+
 
 
 class ScheduleItem(BaseModel):
@@ -125,6 +143,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
     llm = llm or LLMClient(settings)
     model = model_name or settings.whisper_model
     store = SessionStore(settings.data_dir)
+    photos = PhotoStore(settings.data_dir, settings.event_tz)
     glossary_prompt, _ = load_glossary(GLOSSARY)
 
     from contextlib import asynccontextmanager
@@ -255,12 +274,15 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                                "dirname": session.dir.name})
 
             engine = {"transcriber": None, "streamer": None}
+            fed = {"samples": 0, "local_from": 0.0}
 
             def _local_transcriber():
                 if engine["transcriber"] is None:
+                    # it counts from zero even when it takes over midway
+                    fed["local_from"] = fed["samples"] / 16000
                     engine["transcriber"] = transcriber_factory(
                         model_name=model, initial_prompt=glossary_prompt,
-                        on_segment=on_segment)
+                        on_segment=lambda ts, t: on_segment(ts + fed["local_from"], t))
                 return engine["transcriber"]
 
             if streamer_factory is not None:
@@ -307,6 +329,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                         if engine["streamer"] is not None:
                             try:
                                 engine["streamer"].feed(frames)
+                                fed["samples"] += len(frames)
                                 continue
                             except Exception:
                                 log.warning("stream feed failed; falling back "
@@ -335,6 +358,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 return JSONResponse(
                     {"error": "マイクが見つかりません。入力デバイスを確認してください。"},
                     status_code=503)
+            session.update_meta(started_epoch=time.time(), pauses=[])
             worker.start()
             state["mic_ok"] = True
             rec = Recording(session, mic, engine, wav,
@@ -344,6 +368,12 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             date = session.meta["started_at"][:10]
             return {"dirname": session.dir.name, "date": date,
                     "meta": session.meta}
+
+    def _end_pause(rec) -> None:
+        pauses = [list(p) for p in rec.session.meta.get("pauses", [])]
+        if pauses and pauses[-1][1] is None:
+            pauses[-1][1] = time.time()
+            rec.session.update_meta(pauses=pauses)
 
     @app.post("/api/sessions/stop")
     def stop_session():
@@ -360,7 +390,9 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             except Exception:
                 log.exception("stop step failed: %s", name)
 
-        if not rec.paused:
+        if rec.paused:
+            _step("pause time", lambda: _end_pause(rec))
+        else:
             _step("mic", rec.mic.stop)
         rec.frame_queue.put(None)
         rec.worker.join(timeout=30)
@@ -422,6 +454,11 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                                 status_code=409)
         rec.mic.stop()
         rec.paused = True
+        try:
+            rec.session.update_meta(pauses=[*rec.session.meta.get("pauses", []),
+                                            [time.time(), None]])
+        except OSError:
+            log.exception("pause time not saved")
         rec.frame_queue.put(END_UTTERANCE)
         return {"ok": True}
 
@@ -437,6 +474,10 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             return JSONResponse({"error": "マイクの再開に失敗しました"},
                                 status_code=503)
         rec.paused = False
+        try:
+            _end_pause(rec)
+        except OSError:
+            log.exception("resume time not saved")
         return {"ok": True}
 
     @app.patch("/api/sessions/{date}/{dirname}/memo")
@@ -461,6 +502,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         sessions = store.list_for_date(date)
         return {"sessions": [
             {"dirname": s.dir.name, "meta": s.meta,
+             "photos": len(photos.load(photos.folder(s))),
              "summary": (s.dir / "summary.md").exists(),
              "hq": (s.dir / "transcript_hq.md").exists()} for s in sessions]}
 
@@ -471,7 +513,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             return JSONResponse(
                 {"error": "LLM が未設定です。LLM_BASE_URL / LLM_API_KEY / LLM_MODEL を設定してください。"},
                 status_code=503)
-        transcript = session.best_transcript()
+        transcript = session.best_transcript() + photos.slide_text(session)
         answer = transcript_chat(llm, transcript, history=session.chat_history()[-20:],
                                  question=body.question)
         if answer is None:
@@ -502,7 +544,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
     def daily_report(date: str, body: ReportBody | None = None):
         _check_date(date)
         sessions = store.list_for_date(date)
-        md = build_daily_report(sessions, report_llm)
+        md = build_daily_report(sessions, report_llm, photos.slide_text)
         slack = build_slack_post(sessions, report_llm, md,
                                  body.mention if body else "")
         day_dir = settings.data_dir / date
@@ -523,9 +565,18 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         if body.attach_transcript:
             files = [(f"{s.dir.name}.txt", s.transcript_export())
                      for s in store.list_for_date(date)]
+        images, total = [], 0
+        for i, p in enumerate(body.photos, 1):
+            path = _photo(photos.folder(_get_session(str(p.get("date")), str(p.get("dirname")))),
+                          str(p.get("id")))
+            images.append((f"{Path(str(p.get('dirname'))).name}_{i:02d}.jpg", path.read_bytes()))
+            total += len(images[-1][1])
+        if total > 15_000_000:
+            return JSONResponse({"error": "写真の合計が大きすぎます(15MBまで)。枚数を減らしてください。"},
+                                status_code=422)
         try:
             msg = build_message(settings.gmail_address, body.to, body.subject,
-                                body.body, files)
+                                body.body, files, images)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=422)
         try:
@@ -537,7 +588,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             log.warning("mail send failed: %s", type(e).__name__)
             return JSONResponse({"error": "送信できたか確認できません。Gmail の送信済みを確認してください。"},
                                 status_code=502)
-        return {"ok": True, "attachments": len(files)}
+        return {"ok": True, "attachments": len(files) + len(images)}
 
     @app.get("/api/sessions/{date}/{dirname}/audio")
     def download_audio(date: str, dirname: str):
@@ -567,6 +618,115 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                         headers={"Content-Disposition":
                                  f"attachment; filename*=UTF-8''{quote(s.dir.name)}_summary.txt"})
 
+    # ---------- photos ----------
+    def _photo(folder: Path, pid: str) -> Path:
+        try:
+            return photos.jpeg(pid, folder)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="photo not found")
+
+    @app.post("/api/photos/upload")
+    async def upload_photo(request: Request, name: str = "photo"):
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > MAX_BYTES:
+                return JSONResponse({"error": "ファイルが大きすぎます"}, status_code=413)
+        try:
+            return await asyncio.to_thread(photos.add, name, bytes(data))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=422)
+
+    @app.get("/api/photos/inbox")
+    def photo_inbox():
+        sessions = store.all()
+        tz = ZoneInfo(settings.event_tz)
+        recs = []
+        for s in reversed(sessions):
+            a, b = (datetime.fromtimestamp(x, tz) for x in span(s))
+            recs.append({"date": s.dir.parent.name, "dirname": s.dir.name,
+                         "label": f"{a:%m/%d %H:%M}–{b:%H:%M} [{s.meta['id']}] {s.meta['title']}"})
+        items = sorted(photos.load(photos.inbox), key=lambda p: p["taken"] or 0)
+        return {"timezone": settings.event_tz, "recordings": recs, "items": [
+            {**p, "suggest": suggest(p["taken"], sessions),
+             "when": f"{datetime.fromtimestamp(p['taken'], tz):%m/%d %H:%M:%S}" if p["taken"] else None}
+            for p in items]}
+
+    @app.get("/api/photos/inbox/{pid}.jpg")
+    def inbox_image(pid: str):
+        return FileResponse(_photo(photos.inbox, pid), media_type="image/jpeg")
+
+    @app.post("/api/photos/commit")
+    def commit_photos(body: CommitBody):
+        waiting = {p["id"] for p in photos.load(photos.inbox)}
+        moves = [(i["id"], _get_session(str(i["date"]), str(i["dirname"])))
+                 for i in body.items if i.get("id") in waiting]
+        for pid, s in moves:
+            photos.move(pid, photos.inbox, photos.folder(s))
+        return {"saved": len(moves)}
+
+    @app.delete("/api/photos/inbox")
+    def clear_inbox():
+        shutil.rmtree(photos.inbox, ignore_errors=True)
+        return {"ok": True}
+
+    @app.get("/api/sessions/{date}/{dirname}/photos/{pid}.jpg")
+    def session_photo(date: str, dirname: str, pid: str):
+        return FileResponse(_photo(photos.folder(_get_session(date, dirname)), pid),
+                            media_type="image/jpeg")
+
+    @app.delete("/api/sessions/{date}/{dirname}/photos/{pid}")
+    def delete_photo(date: str, dirname: str, pid: str):
+        folder = photos.folder(_get_session(date, dirname))
+        _photo(folder, pid)
+        photos.remove(pid, folder)
+        return {"ok": True}
+
+    @app.post("/api/sessions/{date}/{dirname}/photos/{pid}/move")
+    def move_photo(date: str, dirname: str, pid: str, body: MoveBody):
+        folder = photos.folder(_get_session(date, dirname))
+        _photo(folder, pid)
+        photos.move(pid, folder, photos.folder(_get_session(body.date, body.dirname)))
+        return {"ok": True}
+
+    @app.post("/api/sessions/{date}/{dirname}/photos/{pid}/read")
+    def read_session_photo(date: str, dirname: str, pid: str):
+        folder = photos.folder(_get_session(date, dirname))
+        path = _photo(folder, pid)
+        if not llm.available():
+            return JSONResponse({"error": "LLM が未設定です。"}, status_code=503)
+        text = read_photo(report_llm, path)
+        if not text:
+            return JSONResponse({"error": "読み取りに失敗しました。もう一度お試しください。"},
+                                status_code=502)
+        photos.set_text(pid, folder, text)
+        return {"text": text}
+
+    @app.post("/api/sessions/{date}/{dirname}/resummarize")
+    def resummarize(date: str, dirname: str):
+        s = _get_session(date, dirname)
+        rec: Recording | None = state["recording"]
+        if (rec is not None and rec.session.dir == s.dir) or s.dir.name in state["hq_pending"]:
+            return JSONResponse({"error": "録音の処理が終わってからお試しください。"}, status_code=409)
+        out = summarize_whole(s, report_llm, photos.slide_text(s))
+        if not out:
+            return JSONResponse({"error": "要約を作れませんでした。もう一度お試しください。"},
+                                status_code=502)
+        (s.dir / "summary.md").write_text(out, encoding="utf-8")
+        return {"summary": out}
+
+    @app.post("/api/sessions/{date}/{dirname}/photo-shift")
+    def shift_photos(date: str, dirname: str, body: ShiftBody):
+        _get_session(date, dirname).update_meta(photo_shift_sec=body.seconds)
+        return {"ok": True}
+
+    @app.get("/api/sessions/{date}/{dirname}/article.zip")
+    def article(date: str, dirname: str):
+        s = _get_session(date, dirname)
+        return Response(photos.article_zip(s), media_type="application/zip",
+                        headers={"Content-Disposition":
+                                 f"attachment; filename*=UTF-8''{quote(s.dir.name)}_article.zip"})
+
     @app.post("/api/schedule/import")
     def import_schedule(body: ScheduleBody):
         year, items = event_now().year, []
@@ -591,7 +751,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
     def session_detail(date: str, dirname: str):
         s = _get_session(date, dirname)
         return {"meta": s.meta, "segments": s.segments(),
-                "summary": s.summary_text(), "chat": s.chat_history()}
+                "summary": s.summary_text(), "chat": s.chat_history(),
+                "photos": photos.for_session(s)}
 
     @app.get("/api/status")
     def status():

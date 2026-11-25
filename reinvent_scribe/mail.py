@@ -49,7 +49,8 @@ def markdown_to_html(md: str) -> str:
 
 
 def build_message(sender: str, to: str, subject: str, body_md: str,
-                  attachments: list[tuple[str, str]]) -> EmailMessage:
+                  attachments: list[tuple[str, str]],
+                  images: list[tuple[str, bytes]] = ()) -> EmailMessage:
     recipients = [a.strip() for a in to.split(",") if a.strip()]
     if not recipients or not all(re.fullmatch(r"[^@\s<>,]+@[^@\s<>,]+\.[^@\s<>,]+", a)
                                  for a in recipients):
@@ -62,6 +63,8 @@ def build_message(sender: str, to: str, subject: str, body_md: str,
     for name, text in attachments:
         msg.add_attachment(text.encode("utf-8-sig"), maintype="text",
                            subtype="plain", filename=name)
+    for name, data in images:
+        msg.add_attachment(data, maintype="image", subtype="jpeg", filename=name)
     return msg
 
 
