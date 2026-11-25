@@ -207,7 +207,7 @@ function addSummary(text, label) {
   const card = document.createElement("div");
   card.className = "summary-card";
   const when = new Date().toTimeString().slice(0, 5);
-  card.innerHTML = `<span class="when">${label || `${when} 時点`}</span>${escapeHtml(text)}`;
+  card.innerHTML = `<span class="when">${label || `${when} 時点`}</span>${escapeHtml(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")}`;
   box.prepend(card);
   const where = state.viewing ? state.selected : state.current;
   summary.text = text;
