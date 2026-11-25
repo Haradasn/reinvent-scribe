@@ -61,7 +61,7 @@ def build_message(sender: str, to: str, subject: str, body_md: str,
     msg.add_alternative(markdown_to_html(body_md), subtype="html")
     for name, text in attachments:
         msg.add_attachment(text.encode("utf-8-sig"), maintype="text",
-                           subtype="csv", filename=name)
+                           subtype="plain", filename=name)
     return msg
 
 

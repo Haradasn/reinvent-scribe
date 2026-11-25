@@ -456,7 +456,7 @@ function recordingRow(s) {
     (s.meta.test ? '<span class="tag">テスト</span>' : "") + status +
     (active ? "" :
       `<a class="memo-btn" title="音声をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/audio">♪⤓</a>` +
-      `<a class="memo-btn" title="文字起こしCSVをダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/transcript.csv">CSV⤓</a>`) +
+      `<a class="memo-btn" title="文字起こしをダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/transcript.txt">文字⤓</a>`) +
     `<button class="memo-btn memo-edit" title="メモ編集">✎</button>` +
     `<button class="memo-btn del-btn" title="削除">🗑</button>`;
   li.querySelector(".memo-edit").onclick = () => openMemo(s);
@@ -592,8 +592,8 @@ $("btn-mail").addEventListener("click", async () => {
   const to = $("f-to").value.trim();
   const note = $("mail-note");
   if (!to) { note.textContent = "宛先を入力してください"; return; }
-  const csv = $("f-csv").checked;
-  if (!confirm(`${to} に ${report.date} の日報を送信しますか?${csv ? "\n(文字起こしCSVを添付)" : ""}`)) return;
+  const attach = $("f-attach").checked;
+  if (!confirm(`${to} に ${report.date} の日報を送信しますか?${attach ? "\n(文字起こしを添付)" : ""}`)) return;
   try { localStorage.setItem("mailTo", to); } catch {}
   $("btn-mail").disabled = true;
   note.textContent = "送信中…";
@@ -601,10 +601,10 @@ $("btn-mail").addEventListener("click", async () => {
     const r = await fetch(`/api/daily-report/send?date=${report.date}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, subject: `re:Invent 出張日報 ${report.date}`, body: report.md, attach_csv: csv }),
+      body: JSON.stringify({ to, subject: `re:Invent 出張日報 ${report.date}`, body: report.md, attach_transcript: attach }),
     });
     const d = await r.json();
-    note.textContent = r.ok ? `送信しました ✓${d.attachments ? `(CSV ${d.attachments}件)` : ""}` : d.error || "送信に失敗しました";
+    note.textContent = r.ok ? `送信しました ✓${d.attachments ? `(添付 ${d.attachments}件)` : ""}` : d.error || "送信に失敗しました";
   } catch {
     note.textContent = "送信できたか確認できません。Gmail の送信済みを確認してください";
   }

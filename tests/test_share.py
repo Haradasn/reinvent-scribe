@@ -35,21 +35,21 @@ def test_downloads(tmp_path):
         c.post("/api/sessions/stop")
         r = c.get(url + "/audio")
         assert r.content[:4] == b"RIFF" and "attachment" in r.headers["content-disposition"]
-        r = c.get(url + "/transcript.csv")
+        r = c.get(url + "/transcript.txt")
         assert r.content.startswith(b"\xef\xbb\xbf") and "hello from fake" in r.text
 
 
-def test_send_mail_with_csv(tmp_path):
+def test_send_mail_with_transcript(tmp_path):
     sent = []
     with client(tmp_path, lambda a, p, m: sent.append(m), **GMAIL) as c:
         date, dirname = record(c)
         r = c.post(f"/api/daily-report/send?date={date}", json={
             "to": "a@example.com, b@example.com", "subject": "x\ny", "body": "# 日報",
-            "attach_csv": True})
+            "attach_transcript": True})
         assert r.json() == {"ok": True, "attachments": 1}
         m = sent[0]
         assert m["To"] == "a@example.com, b@example.com" and m["Subject"] == "x y"
-        assert [p.get_filename() for p in m.iter_attachments()] == [dirname + ".csv"]
+        assert [p.get_filename() for p in m.iter_attachments()] == [dirname + ".txt"]
         bad = c.post(f"/api/daily-report/send?date={date}",
                      json={"to": "nope", "subject": "", "body": "x"})
         assert bad.status_code == 422 and len(sent) == 1

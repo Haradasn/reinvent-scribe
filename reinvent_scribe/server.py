@@ -53,7 +53,7 @@ class MailBody(BaseModel):
     to: str
     subject: str
     body: str
-    attach_csv: bool = False
+    attach_transcript: bool = False
 
 
 class ScheduleItem(BaseModel):
@@ -494,8 +494,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         if not body.body.strip():
             return JSONResponse({"error": "先に日報を生成してください。"}, status_code=422)
         files = []
-        if body.attach_csv:
-            files = [(f"{s.dir.name}.csv", s.transcript_csv())
+        if body.attach_transcript:
+            files = [(f"{s.dir.name}.txt", s.transcript_export())
                      for s in store.list_for_date(date)]
         try:
             msg = build_message(settings.gmail_address, body.to, body.subject,
@@ -525,12 +525,12 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         return FileResponse(s.dir / "audio.wav", media_type="audio/wav",
                             filename=f"{s.dir.name}.wav")
 
-    @app.get("/api/sessions/{date}/{dirname}/transcript.csv")
-    def download_csv(date: str, dirname: str):
+    @app.get("/api/sessions/{date}/{dirname}/transcript.txt")
+    def download_transcript(date: str, dirname: str):
         s = _get_session(date, dirname)
-        return Response(s.transcript_csv().encode("utf-8-sig"), media_type="text/csv",
+        return Response(s.transcript_export().encode("utf-8-sig"), media_type="text/plain",
                         headers={"Content-Disposition":
-                                 f"attachment; filename*=UTF-8''{quote(s.dir.name)}.csv"})
+                                 f"attachment; filename*=UTF-8''{quote(s.dir.name)}.txt"})
 
     @app.post("/api/schedule/import")
     def import_schedule(body: ScheduleBody):

@@ -1,5 +1,3 @@
-import csv
-import io
 import json
 import re
 from datetime import datetime
@@ -83,13 +81,17 @@ class Session:
                     target["ja"] += "\n" + line
         return out
 
-    def transcript_csv(self) -> str:
-        buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["時刻", "英語", "日本語訳"])
+    def transcript_export(self) -> str:
+        """Plain text that opens anywhere: English with its translation."""
+        m = self.meta
+        head = [f"[{m['id']}] {m['title']}", f"日時: {m['started_at'][:16].replace('T', ' ')}"]
+        if m.get("venue"):
+            head.append(f"会場: {m['venue']}")
+        blocks = ["\n".join(head)]
         for s in self.segments():
-            w.writerow([_fmt_ts(s["ts"]), s["text"], s["ja"]])
-        return buf.getvalue()
+            blocks.append(f"[{_fmt_ts(s['ts'])}]\n{s['text']}"
+                          + (f"\n{s['ja']}" if s["ja"] else ""))
+        return "\n\n".join(blocks) + "\n"
 
     def best_transcript(self) -> str:
         hq = self.dir / "transcript_hq.md"
