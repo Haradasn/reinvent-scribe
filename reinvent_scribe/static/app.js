@@ -19,7 +19,7 @@ const today = () => {
 };
 
 /* ---------- status chips ---------- */
-const LLM_ERR = { busy: "混雑中(自動で再試行)", rate_limited: "利用上限", auth: "APIキーエラー", network: "接続なし" };
+const LLM_ERR = { busy: "混雑中(自動で再試行)", rate_limited: "利用上限", auth: "APIキーエラー", payment: "残高不足", network: "接続なし" };
 async function refreshStatus() {
   try {
     const s = await (await fetch("/api/status")).json();
@@ -456,7 +456,8 @@ function recordingRow(s) {
     (s.meta.test ? '<span class="tag">テスト</span>' : "") + status +
     (active ? "" :
       `<a class="memo-btn" title="音声をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/audio">♪⤓</a>` +
-      `<a class="memo-btn" title="文字起こしをダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/transcript.txt">文字⤓</a>`) +
+      `<a class="memo-btn" title="文字起こしをダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/transcript.txt">文字⤓</a>` +
+      (s.summary ? `<a class="memo-btn" title="日本語要約をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/summary.txt">要約⤓</a>` : "")) +
     `<button class="memo-btn memo-edit" title="メモ編集">✎</button>` +
     `<button class="memo-btn del-btn" title="削除">🗑</button>`;
   li.querySelector(".memo-edit").onclick = () => openMemo(s);

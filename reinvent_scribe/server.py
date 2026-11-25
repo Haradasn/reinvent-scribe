@@ -451,6 +451,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         sessions = store.list_for_date(date)
         return {"sessions": [
             {"dirname": s.dir.name, "meta": s.meta,
+             "summary": (s.dir / "summary.md").exists(),
              "hq": (s.dir / "transcript_hq.md").exists()} for s in sessions]}
 
     @app.post("/api/sessions/{date}/{dirname}/chat")
@@ -466,7 +467,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         answer = transcript_chat(llm, transcript, history=session.chat_history()[-20:],
                                  question=body.question)
         if answer is None:
-            return JSONResponse({"error": "AIサービスが混雑しているか、接続できません。もう一度送信してください。"},
+            return JSONResponse({"error": "AIサービスの残高が不足しています。" if getattr(llm, "last_error", None) == "payment"
+                                 else "AIサービスが混雑しているか、接続できません。もう一度送信してください。"},
                                 status_code=502)
         session.append_chat("user", body.question)
         session.append_chat("assistant", answer)
@@ -531,6 +533,15 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         return Response(s.transcript_export().encode("utf-8-sig"), media_type="text/plain",
                         headers={"Content-Disposition":
                                  f"attachment; filename*=UTF-8''{quote(s.dir.name)}.txt"})
+
+    @app.get("/api/sessions/{date}/{dirname}/summary.txt")
+    def download_summary(date: str, dirname: str):
+        s = _get_session(date, dirname)
+        if not s.summary_text().strip():
+            return JSONResponse({"error": "要約がありません"}, status_code=404)
+        return Response(s.summary_export().encode("utf-8-sig"), media_type="text/plain",
+                        headers={"Content-Disposition":
+                                 f"attachment; filename*=UTF-8''{quote(s.dir.name)}_summary.txt"})
 
     @app.post("/api/schedule/import")
     def import_schedule(body: ScheduleBody):

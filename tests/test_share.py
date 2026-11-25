@@ -106,3 +106,13 @@ def test_gmail_hangup_during_login_is_an_auth_error(monkeypatch):
     monkeypatch.setattr(mail.smtplib, "SMTP_SSL", Smtp)
     with pytest.raises(smtplib.SMTPAuthenticationError):
         mail.send_gmail("a@example.com", "pw", None)
+
+
+def test_summary_download(tmp_path):
+    with client(tmp_path) as c:
+        date, name = record(c)
+        url = f"/api/sessions/{date}/{name}/summary.txt"
+        assert c.get(url).status_code == 404
+        (tmp_path / date / name / "summary.md").write_text("要点です", encoding="utf-8")
+        assert "[K] t" in c.get(url).text and "要点です" in c.get(url).text
+        assert c.get(f"/api/sessions?date={date}").json()["sessions"][0]["summary"] is True

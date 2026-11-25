@@ -81,13 +81,19 @@ class Session:
                     target["ja"] += "\n" + line
         return out
 
-    def transcript_export(self) -> str:
-        """Plain text that opens anywhere: English with its translation."""
+    def summary_export(self) -> str:
+        return self._export_head() + "\n\n" + self.summary_text().strip() + "\n"
+
+    def _export_head(self) -> str:
         m = self.meta
         head = [f"[{m['id']}] {m['title']}", f"日時: {m['started_at'][:16].replace('T', ' ')}"]
         if m.get("venue"):
             head.append(f"会場: {m['venue']}")
-        blocks = ["\n".join(head)]
+        return "\n".join(head)
+
+    def transcript_export(self) -> str:
+        """Plain text that opens anywhere: English with its translation."""
+        blocks = [self._export_head()]
         for s in self.segments():
             blocks.append(f"[{_fmt_ts(s['ts'])}]\n{s['text']}"
                           + (f"\n{s['ja']}" if s["ja"] else ""))

@@ -77,8 +77,8 @@ class LLMClient:
                 log.warning("LLM %s returned %d: %s", model, resp.status_code,
                             resp.text[:700])
                 error = {503: "busy", 429: "rate_limited", 401: "auth",
-                         403: "auth"}.get(resp.status_code, "error")
-                return None, error, error != "auth"
+                         403: "auth", 402: "payment"}.get(resp.status_code, "error")
+                return None, error, error not in ("auth", "payment")
             choice = resp.json()["choices"][0]
             if choice.get("finish_reason") == "length":
                 log.warning("LLM %s answer was cut off", model)

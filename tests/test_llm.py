@@ -114,3 +114,15 @@ def test_cut_off_answer_is_not_used_and_gemini_gets_room_for_thinking():
     assert c.chat([]) == "whole"
     assert bodies[0]["max_tokens"] == 8192
     assert bodies[0]["reasoning_effort"] == "low"
+
+
+def test_depleted_credits_are_reported_without_trying_other_models():
+    n = []
+
+    def handler(request):
+        n.append(1)
+        return httpx.Response(402)
+
+    c = client_with(handler)
+    c.settings.llm_fallback_models = "backup"
+    assert c.chat([]) is None and c.last_error == "payment" and len(n) == 1
