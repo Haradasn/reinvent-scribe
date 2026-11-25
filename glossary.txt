@@ -1,0 +1,12 @@
+AWS Amazon EC2 S3 Lambda DynamoDB Aurora RDS Redshift SageMaker Bedrock
+EKS ECS Fargate EventBridge CloudFormation CloudWatch CloudTrail CloudFront
+Kinesis Firehose Athena Glue EMR QuickSight OpenSearch ElastiCache MemoryDB
+Step Functions API Gateway AppSync Amplify Cognito IAM KMS Secrets Manager
+GuardDuty Inspector Macie WAF Shield Control Tower Organizations
+Graviton Nitro Trainium Inferentia Outposts Local Zones Wavelength
+VPC Transit Gateway PrivateLink Direct Connect Route 53 Global Accelerator
+SQS SNS MQ MSK Kafka Karpenter Kubernetes Terraform
+CodePipeline CodeBuild CodeDeploy CloudShell CDK CLI
+Q Developer Q Business Nova Titan Anthropic Claude generative AI LLM RAG
+agentic workflows multi-agent inference fine-tuning embeddings vector database
+Werner Vogels Matt Garman Swami Sivasubramanian Peter DeSantis keynote re:Invent
