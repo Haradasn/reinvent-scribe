@@ -173,7 +173,11 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         origin = request.headers.get("origin")
         if origin and origin not in (f"http://{request.headers.get('host')}",):
             return JSONResponse({"error": "forbidden"}, status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            # after an update, a reload must not keep running the old app.js
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     app.add_middleware(TrustedHostMiddleware,
                        allowed_hosts=["127.0.0.1", "localhost", "testserver"])
