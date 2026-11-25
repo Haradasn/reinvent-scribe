@@ -35,7 +35,9 @@ def markdown_to_html(md: str) -> str:
         elif re.match(r"[-*・]\s*\S", s) and not s.startswith("**"):
             switch("ul")
             text = re.sub(r"^[-*・]\s*", "", s)
-            out.append(f"<li>{inline(text)}</li>")
+            depth = (len(line) - len(line.lstrip())) // 2
+            pad = f' style="margin-left:{depth * 20}px"' if depth else ""
+            out.append(f"<li{pad}>{inline(text)}</li>")
         elif m := re.match(r"(#{1,4})\s+(.*)", s):
             switch(None)
             n = len(m[1]) + 1

@@ -165,6 +165,7 @@ function addCaption(ts, text, translating) {
   const div = document.createElement("div");
   div.className = "caption";
   div.dataset.ts = String(ts);
+  div.tabIndex = 0;
   div.innerHTML = `<span class="ts">${fmtTs(ts)}</span>${escapeHtml(text)}`;
   if (translating) {
     const p = document.createElement("div");
@@ -207,7 +208,147 @@ function addSummary(text, label) {
   const when = new Date().toTimeString().slice(0, 5);
   card.innerHTML = `<span class="when">${label || `${when} 時点`}</span>${escapeHtml(text)}`;
   box.prepend(card);
+  const where = state.viewing ? state.selected : state.current;
+  summary.text = text;
+  summary.where = where && { ...where };
+  showSummaryTools();
 }
+
+/* ---------- copy / mail the summary on screen ---------- */
+const summary = { text: "", where: null };
+function showSummaryTools() {
+  for (const id of ["btn-sum-copy", "btn-sum-mail"]) $(id).classList.toggle("hidden", !summary.text);
+}
+function clearSummary(text) {
+  summary.text = "";
+  summary.where = null;
+  setPlaceholder("summaries", text);
+  showSummaryTools();
+}
+
+$("btn-sum-copy").addEventListener("click", async () => {
+  const b = $("btn-sum-copy");
+  try {
+    await navigator.clipboard.writeText(summary.text);
+    b.textContent = "コピーしました ✓";
+  } catch {
+    b.textContent = "コピーできませんでした";
+  }
+  setTimeout(() => (b.textContent = "コピー"), 1500);
+});
+
+$("btn-sum-mail").addEventListener("click", async () => {
+  const where = summary.where && { ...summary.where };
+  if (!where) return;
+  const text = summary.text; // what the user saw, even if a newer one arrives
+  const url = `/api/sessions/${where.date}/${encodeURIComponent(where.dirname)}`;
+  let d;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error();
+    d = await r.json();
+  } catch {
+    alert("録音の情報を読めませんでした");
+    return;
+  }
+  try { $("s-to").value = localStorage.getItem("mailTo") || ""; } catch {}
+  $("s-subject").value = `[${d.meta.id}] ${d.meta.title} 要約`;
+  $("s-body").value = `# [${d.meta.id}] ${d.meta.title}\n\n${d.meta.venue ? `会場: ${d.meta.venue}\n\n` : ""}${text}`;
+  $("s-attach").checked = false;
+  const grid = $("s-photos");
+  grid.replaceChildren();
+  for (const p of d.photos) {
+    const l = document.createElement("label");
+    l.innerHTML = `<input type="checkbox"><img loading="lazy" alt="スライド写真" src="${photoUrl(where.date, where.dirname, p.id)}">`;
+    l.firstChild.dataset.id = p.id;
+    grid.appendChild(l);
+  }
+  const send = $("btn-s-send");
+  send.disabled = !state.mailOk;
+  $("s-note").textContent = state.mailOk ? "" : ".env に Gmail の設定が必要です(README参照)";
+  send.onclick = async () => {
+    const to = $("s-to").value.trim();
+    if (!to) { $("s-note").textContent = "宛先を入力してください"; return; }
+    const photos = [...grid.querySelectorAll("input:checked")].map((i) => ({ ...where, id: i.dataset.id }));
+    if (!confirm(`${to} に要約を送信しますか?${$("s-attach").checked ? "\n(文字起こしを添付)" : ""}${photos.length ? `\n(写真${photos.length}枚を添付。共有してよい写真か確認してください)` : ""}`)) return;
+    try { localStorage.setItem("mailTo", to); } catch {}
+    send.disabled = true;
+    $("s-note").textContent = "送信中…";
+    try {
+      const r = await fetch(`${url}/send-summary`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, subject: $("s-subject").value, body: $("s-body").value,
+          attach_transcript: $("s-attach").checked, photos }),
+      });
+      const x = await r.json();
+      $("s-note").textContent = r.ok ? `送信しました ✓${x.attachments ? `(添付 ${x.attachments}件)` : ""}` : x.error || "送信に失敗しました";
+    } catch {
+      $("s-note").textContent = "送信できたか確認できません。Gmail の送信済みを確認してください";
+    }
+    send.disabled = false;
+  };
+  $("sum-modal").showModal();
+});
+$("btn-s-close").addEventListener("click", () => $("sum-modal").close());
+
+/* ---------- enlarge captions ---------- */
+$("btn-wide").addEventListener("click", () => {
+  const on = document.body.classList.toggle("wide-captions");
+  $("btn-wide").textContent = on ? "⤡ 元に戻す" : "⤢ 大きく表示";
+  $("btn-wide").setAttribute("aria-pressed", String(on));
+  scrollToLatest();
+});
+
+let openCard = null;
+const cards = () => [...capBox.querySelectorAll(".caption:not(.partial)")];
+function showCard(card) {
+  openCard = card;
+  const copy = card.cloneNode(true);
+  copy.className = `caption-large${card.classList.contains("photo") ? " photo" : ""}`;
+  const btn = copy.querySelector(".photo-btn");
+  if (btn) btn.replaceWith(btn.querySelector("img"));
+  for (const x of copy.querySelectorAll("details")) x.open = true;
+  const parts = [copy];
+  if (btn) { // a slide makes sense next to what was being said
+    const all = cards(), i = all.indexOf(card);
+    const before = all.slice(0, i).reverse().find((c) => !c.classList.contains("photo"));
+    const after = all.slice(i + 1).find((c) => !c.classList.contains("photo"));
+    for (const c of [before, after]) if (c) {
+      const near = c.cloneNode(true);
+      near.className = "caption-large near";
+      parts.push(near);
+    }
+  }
+  $("card-body").replaceChildren(...parts);
+  $("card-body").scrollTop = 0;
+  $("btn-card-photo").classList.toggle("hidden", !card.openPhoto);
+  const all = cards(), i = all.indexOf(card);
+  $("btn-card-prev").disabled = i <= 0;
+  $("btn-card-next").disabled = i < 0 || i >= all.length - 1;
+  if (!$("card-modal").open) $("card-modal").showModal();
+}
+function stepCard(d) {
+  const all = cards(), next = all[all.indexOf(openCard) + d];
+  if (next) showCard(next);
+}
+capBox.addEventListener("click", (e) => {
+  const card = e.target.closest(".caption:not(.partial)");
+  if (!card || e.target.closest("details") || String(getSelection())) return;
+  showCard(card);
+});
+capBox.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.classList.contains("caption")) showCard(e.target);
+});
+$("btn-card-prev").addEventListener("click", () => stepCard(-1));
+$("btn-card-next").addEventListener("click", () => stepCard(1));
+$("btn-card-close").addEventListener("click", () => $("card-modal").close());
+$("btn-card-photo").addEventListener("click", () => { $("card-modal").close(); openCard.openPhoto(); });
+// on the document: a disabled prev/next button drops focus out of the dialog
+document.addEventListener("keydown", (e) => {
+  if (!$("card-modal").open) return;
+  if (e.key === "ArrowLeft") stepCard(-1);
+  if (e.key === "ArrowRight") stepCard(1);
+});
 
 function showPartial(text) {
   const box = $("captions");
@@ -266,7 +407,7 @@ function setPlaceholder(id, text) {
 function clearScreen() {
   state.viewId++;
   setPlaceholder("captions", "録音を開始すると、ここに英語字幕が流れます");
-  setPlaceholder("summaries", "オンライン時、約3分ごとに要約が更新されます");
+  clearSummary("オンライン時、約3分ごとに要約が更新されます");
   $("chat-log").replaceChildren();
   $("chat-input").value = "";
   $("chat-input").placeholder = "文字起こしについて質問する…";
@@ -534,7 +675,7 @@ async function openSession(date, dirname) {
   for (const p of shots) addPhoto(p, date, dirname);
   if (d.photos.length) photoBar(d, date, dirname);
   if (d.summary) addSummary(d.summary, "保存済みの要約");
-  else setPlaceholder("summaries", "この録音の要約はありません");
+  else clearSummary("この録音の要約はありません");
   $("captions").scrollTop = 0;
   showLatestBtn();
   $("btn-clear").classList.remove("hidden");
@@ -747,7 +888,8 @@ function addPhoto(p, date, dirname) {
     t.append(sum, body);
     div.appendChild(t);
   }
-  div.querySelector("button").onclick = () => viewPhoto(p, date, dirname);
+  div.openPhoto = () => viewPhoto(p, date, dirname);
+  div.tabIndex = 0;
   capBox.appendChild(div);
 }
 

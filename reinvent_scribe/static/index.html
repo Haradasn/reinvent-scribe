@@ -48,6 +48,7 @@
       <div class="captions-empty">録音を開始すると、ここに英語字幕が流れます</div>
     </div>
     <div class="panel-foot">
+      <button id="btn-wide" class="ghost-btn" aria-pressed="false">⤢ 大きく表示</button>
       <button id="btn-latest" class="latest-btn hidden">↓ 最新の字幕へ</button>
       <button id="btn-clear" class="ghost-btn hidden">画面をクリア(データは保存済み)</button>
     </div>
@@ -57,6 +58,10 @@
   <section class="panel glass summary-panel">
     <div class="panel-head">
       <h2>日本語要約</h2>
+      <span class="head-tools">
+        <button id="btn-sum-copy" class="ghost-btn hidden">コピー</button>
+        <button id="btn-sum-mail" class="ghost-btn hidden">メールで送る</button>
+      </span>
       <span id="summary-badge" class="badge offline">オフライン(字幕のみ)</span>
     </div>
     <div id="summaries" class="summaries">
@@ -138,6 +143,32 @@
     <button id="btn-photo-clear" class="ghost-btn">すべて取り消す</button>
     <button id="btn-photo-close" class="ghost-btn">あとで決める</button>
     <button id="btn-photo-save" class="primary-btn" disabled>選択した写真を保存</button>
+  </div>
+</dialog>
+
+<!-- Caption card, enlarged -->
+<dialog id="card-modal" class="modal glass photo-modal">
+  <div id="card-body" class="card-body"></div>
+  <div class="modal-actions">
+    <button id="btn-card-prev" class="ghost-btn">← 前</button>
+    <button id="btn-card-next" class="ghost-btn">次 →</button>
+    <button id="btn-card-photo" class="ghost-btn">写真の操作(読み取り・移動・削除)</button>
+    <button id="btn-card-close" class="primary-btn">閉じる</button>
+  </div>
+</dialog>
+
+<!-- Summary mail -->
+<dialog id="sum-modal" class="modal glass wide">
+  <h2>要約をメールで送る</h2>
+  <label>宛先 <input id="s-to" type="email" multiple placeholder="manager@example.com" autocomplete="off"></label>
+  <label>件名 <input id="s-subject" autocomplete="off"></label>
+  <label>本文 <textarea id="s-body" rows="12"></textarea></label>
+  <label class="check"><input id="s-attach" type="checkbox"> 文字起こし(英語+日本語訳、テキスト)を添付</label>
+  <div id="s-photos" class="photo-grid"></div>
+  <div class="modal-actions">
+    <span id="s-note" role="status"></span>
+    <button id="btn-s-close" class="ghost-btn">閉じる</button>
+    <button id="btn-s-send" class="primary-btn">Gmailで送信</button>
   </div>
 </dialog>
 

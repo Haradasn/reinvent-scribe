@@ -132,3 +132,15 @@ def test_web_answers_are_saved_apart_from_chat(tmp_path):
         r = c.post(f"/api/sessions/{date}/{name}/web-search", json={"question": "q"})
         assert "https://a.com" in r.json()["answer"]
         assert c.get(f"/api/sessions/{date}/{name}").json()["chat"][0]["role"] == "web"
+
+
+def test_send_summary_of_one_recording(tmp_path):
+    sent = []
+    with client(tmp_path, lambda a, p, m: sent.append(m), **GMAIL) as c:
+        date, name = record(c)
+        record(c)
+        r = c.post(f"/api/sessions/{date}/{name}/send-summary", json={
+            "to": "a@example.com", "subject": "要約", "body": "- a\n  - b", "attach_transcript": True})
+        assert r.json()["attachments"] == 1
+        assert [p.get_filename() for p in sent[0].iter_attachments()] == [name + ".txt"]
+        assert "margin-left:20px" in sent[0].get_body(("html",)).get_content()

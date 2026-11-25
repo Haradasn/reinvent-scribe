@@ -649,15 +649,22 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
     @app.post("/api/daily-report/send")
     def send_report(date: str, body: MailBody):
         _check_date(date)
+        return _send_mail(body, store.list_for_date(date))
+
+    @app.post("/api/sessions/{date}/{dirname}/send-summary")
+    def send_summary(date: str, dirname: str, body: MailBody):
+        return _send_mail(body, [_get_session(date, dirname)])
+
+    def _send_mail(body: MailBody, sessions: list):
         if not (settings.gmail_address and settings.gmail_app_password):
             return JSONResponse({"error": ".env に GMAIL_ADDRESS と GMAIL_APP_PASSWORD を設定し、アプリを再起動してください。"},
                                 status_code=503)
         if not body.body.strip():
-            return JSONResponse({"error": "先に日報を生成してください。"}, status_code=422)
+            return JSONResponse({"error": "本文がありません。"}, status_code=422)
         files = []
         if body.attach_transcript:
             files = [(f"{s.dir.name}.txt", s.transcript_export())
-                     for s in store.list_for_date(date)]
+                     for s in sessions]
         images, total = [], 0
         for i, p in enumerate(body.photos, 1):
             path = _photo(photos.folder(_get_session(str(p.get("date")), str(p.get("dirname")))),
