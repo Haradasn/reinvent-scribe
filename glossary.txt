@@ -1,8 +1,94 @@
 # 聞き間違えやすい製品名や登壇者名を1行に1つ書きます。# で始まる行は読みません
 # AssemblyAI へは先頭から100個まで、50文字以下の語を送ります
 # 普通の英単語や、AWS のように誰でも聞き取れる語は入れない方が誤変換が減ります
+# 上の行ほど優先します。前半は re:Invent 2026 の予定(AgentCore・コスト管理・エージェント関連)の語、後半は AWS 全般の語です
 re:Invent
 Amazon Bedrock
+AgentCore
+Amazon Bedrock AgentCore
+AgentCore Runtime
+AgentCore Memory
+AgentCore Identity
+AgentCore Payments
+AgentCore Harness
+AgentCore Optimization
+Bedrock Guardrails
+ApplyGuardrail
+InvokeGuardrailChecks
+Strands
+Strands Agents
+LangGraph
+CrewAI
+OpenTelemetry
+OpenInference
+Lambda Durable Functions
+CloudWatch
+Cost Explorer
+CUR 2.0
+CUDOS
+FinOps
+Reserved Tier
+tokenomics
+x402
+Cedar
+microVM
+MCP
+RAG
+ABAC
+STS
+actorId
+Token Vending Machine
+OAuth
+Rich Authorization Requests
+Aurora PostgreSQL
+pgvector
+SERIALIZABLE
+trigram
+representment
+LLM-as-judge
+New Relic
+GameDay
+ResolveAI
+Matt Garman
+Swami Sivasubramanian
+Peter DeSantis
+Werner Vogels
+Tony Xu
+Barbara Karuth-Zelle
+Satveer Khurpa
+Shishir Bharathi
+Hans Nesbitt
+Aakash Upadhyay
+Sebastian Marines
+Gunnar Grosch
+Raphael Manke
+Raviteja Sunkavalli
+Yiwen Zhang
+Lillian Pham
+Steph Gooch
+Mona Mona
+Vanitha Sugumaran
+Krishna Kadiyala
+Paul Mietz Egli
+Daniel Wirjo
+Nihilson Gnanadason
+Phelipe Fabres
+Noor Randhawa
+Avichal Chum
+Viraj Padte
+Piyali Kamra
+Mastan Shaik
+Sreedhar Gade
+Shivani Singh
+Yuriy Prykhodko
+Judith Lehner
+Brenno Passanha
+Jeff Lombardo
+Fei Yuan
+Prasanna Sridharan
+Dheeraj Hegde
+Aditya Samant
+Vlad Vlasceanu
 Bedrock AgentCore
 Amazon Nova
 Amazon Q Developer
@@ -40,7 +126,6 @@ Macie
 Security Hub
 Control Tower
 CloudFormation
-CloudWatch
 CloudTrail
 CloudFront
 CDK
@@ -72,12 +157,5 @@ Global Accelerator
 Anthropic
 Claude
 Titan
-RAG
 agentic
 Model Context Protocol
-MCP
-Strands Agents
-Werner Vogels
-Matt Garman
-Swami Sivasubramanian
-Peter DeSantis
