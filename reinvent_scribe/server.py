@@ -180,6 +180,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             # Per-segment Japanese translation: a single worker keeps order
             # and its failures never touch captions or recording.
             jp_queue: queue.Queue = queue.Queue()
+            recent: list[str] = []
 
             def _jp_worker() -> None:
                 retry: list = []
@@ -196,12 +197,20 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                     if not _translate(ts, text, last=tries >= 4) and tries < 4:
                         retry.append((ts, text, tries + 1))
 
+            def _previous(text) -> str:
+                i = recent.index(text) if text in recent else 0
+                return ("\n\n## 直前の発言(参考。訳さない)\n" + recent[i - 1][-300:]
+                        if i else "")
+
             def _translate(ts, text, last) -> bool:
                 try:
                     out = llm.chat([{"role": "user", "content":
                                      "次の発言を自然な日本語に翻訳してください。"
                                      "すでに日本語ならそのまま返すこと。"
-                                     "訳文のみを返すこと。\n\n" + text}],
+                                     "訳文のみを返すこと。"
+                                     "発言は文の途中で始まったり切れたりする。原文にない内容で"
+                                     "補わず、切れた所までを訳すこと。"
+                                     + _previous(text) + "\n\n## 訳す発言\n" + text}],
                                    max_tokens=1000)
                     if out:
                         # one line: it may be saved after later captions
@@ -229,6 +238,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 broadcast({"type": "segment", "ts": ts, "text": text,
                            "translating": jp_worker is not None})
                 if jp_worker is not None:
+                    recent.append(text)
                     jp_queue.put((ts, text, 0))
                 if summarizer.due():
                     threading.Thread(target=_run_summary, daemon=True).start()
@@ -461,9 +471,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             return JSONResponse(
                 {"error": "LLM が未設定です。LLM_BASE_URL / LLM_API_KEY / LLM_MODEL を設定してください。"},
                 status_code=503)
-        hq = session.dir / "transcript_hq.md"
-        transcript = hq.read_text(encoding="utf-8") if hq.exists() \
-            else session.transcript_text()
+        transcript = session.best_transcript()
         answer = transcript_chat(llm, transcript, history=session.chat_history()[-20:],
                                  question=body.question)
         if answer is None:

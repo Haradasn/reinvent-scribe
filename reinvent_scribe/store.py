@@ -100,8 +100,14 @@ class Session:
         return "\n\n".join(blocks) + "\n"
 
     def best_transcript(self) -> str:
-        hq = self.dir / "transcript_hq.md"
-        return hq.read_text(encoding="utf-8") if hq.exists() else self.transcript_text()
+        live = "\n".join(f"[{_fmt_ts(s['ts'])}] {s['text']}" for s in self.segments())
+        path = self.dir / "transcript_hq.md"
+        if not path.exists():
+            return live or self.transcript_text()
+        hq = path.read_text(encoding="utf-8")
+        # the second pass can drop sentences when the audio is poor
+        n = len(live.split())
+        return live if n >= 100 and len(hq.split()) < n * 0.9 else hq
 
     def summary_text(self) -> str:
         path = self.dir / "summary.md"

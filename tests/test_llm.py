@@ -57,12 +57,12 @@ def test_transcript_chat_truncates_long_transcript():
             "choices": [{"message": {"content": "answer"}}]})
 
     c = client_with(handler)
-    transcript = "HEAD " + ("x" * 20000) + " TAIL"
+    transcript = "HEAD " + ("x" * 250000) + " TAIL"
     out = transcript_chat(c, transcript, history=[], question="what?")
     assert out == "answer"
     system = captured["body"]["messages"][0]["content"]
     assert "HEAD" in system and "TAIL" in system
-    assert len(system) < 12000
+    assert len(system) < 210000
 
 
 def test_overloaded_model_falls_back_and_is_skipped_next_time():

@@ -8,8 +8,8 @@ from .config import Settings
 
 log = logging.getLogger(__name__)
 
-_HEAD_CHARS = 2000
-_TAIL_CHARS = 6000
+_HEAD_CHARS = 20000
+_TAIL_CHARS = 180000
 
 # tried in order when the configured model is overloaded (503/429/timeout)
 _GEMINI_FALLBACKS = "gemini-3.6-flash,gemini-3.5-flash"
@@ -162,7 +162,9 @@ def transcript_chat(llm: LLMClient, transcript: str, history: list[dict],
     system = (
         "あなたは技術カンファレンスのセッション聴講を支援するアシスタントです。"
         "以下はセッションの英語文字起こしです。これを文脈として、ユーザーの質問に"
-        "日本語で簡潔に答えてください。\n\n---\n"
+        "日本語で簡潔に答えてください。文字起こしに答えがない場合は、最初の行に"
+        "「この録音では触れられていません。」と書き、その後に一般知識で補足してよい"
+        "(不確かな点は不確かと書く)。文字起こしの誤認識らしい語は文脈から補うこと。\n\n---\n"
         + _clip_transcript(transcript)
     )
     messages = [{"role": "system", "content": system}, *[m for m in history if m["role"] in ("user", "assistant")],

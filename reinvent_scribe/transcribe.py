@@ -44,6 +44,28 @@ def _read_wav(path: Path) -> np.ndarray:
     return data.astype(np.float32) / 32768.0
 
 
+def level_audio(x: np.ndarray, target: float = 0.06) -> np.ndarray:
+    """Bring quiet speech up to a steady level.
+
+    A distant speaker is recorded so softly that Whisper's voice detection
+    drops whole sentences. Uses the loud part of the surrounding ~6s so
+    pauses between words are not blown up.
+    """
+    n, k = 8000, len(x) // 8000 + 1
+    if len(x) == 0:
+        return x
+    rms = np.array([np.sqrt(np.mean(b ** 2) + 1e-12) if len(b) else 1e-6
+                    for b in (x[i * n:(i + 1) * n] for i in range(k))])
+    loud = np.array([np.percentile(rms[max(0, i - 6):i + 7], 80) for i in range(k)])
+    gain = np.clip(target / loud, 1, 20)
+    centers = np.arange(k) * n + n / 2
+    out = np.empty(len(x), dtype=np.float32)
+    for s in range(0, len(x), 960000):  # a minute at a time: keep memory flat
+        e = min(s + 960000, len(x))
+        out[s:e] = np.clip(x[s:e] * np.interp(np.arange(s, e), centers, gain), -1, 1)
+    return out
+
+
 def pick_model(preferred: str = "small.en") -> str:
     """Benchmark the preferred model on silence; fall back if slower than 1x."""
     try:
@@ -95,7 +117,7 @@ class Transcriber:
         if self.initial_prompt:
             kwargs["initial_prompt"] = self.initial_prompt
         try:
-            segments, _ = self.model.transcribe(audio, **kwargs)
+            segments, _ = self.model.transcribe(level_audio(audio), **kwargs)
             for seg in segments:
                 text = seg.text.strip()
                 if text:
@@ -109,8 +131,10 @@ def transcribe_file(wav_path: Path, model_name: str = "large-v3-turbo",
                     initial_prompt: str = "") -> list[tuple[float, str]]:
     """Second-pass high-quality transcription of a saved WAV."""
     model = _load_model(model_name)
-    kwargs = dict(language="en", vad_filter=True)
+    kwargs = dict(language="en", vad_filter=True, condition_on_previous_text=False,
+                  vad_parameters=dict(threshold=0.25, min_silence_duration_ms=2000,
+                                      speech_pad_ms=600))
     if initial_prompt:
         kwargs["initial_prompt"] = initial_prompt
-    segments, _ = model.transcribe(_read_wav(Path(wav_path)), **kwargs)
+    segments, _ = model.transcribe(level_audio(_read_wav(Path(wav_path))), **kwargs)
     return [(seg.start, seg.text.strip()) for seg in segments if seg.text.strip()]
