@@ -142,6 +142,15 @@ def test_mic(seconds: float = 2.0) -> dict:
     return {"name": name, "rms": round(rms)}
 
 
+def shown_extension_dir() -> str:
+    """Path for the screen, with the user name masked (screenshots get shared)."""
+    home = Path.home()
+    try:
+        return str(home.parent / "xxxx" / EXTENSION_DIR.relative_to(home.resolve()))
+    except ValueError:
+        return f"…/{EXTENSION_DIR.parent.name}/{EXTENSION_DIR.name}"
+
+
 def open_extension_folder() -> None:
     if sys.platform == "darwin":
         subprocess.Popen(["open", str(EXTENSION_DIR)])
