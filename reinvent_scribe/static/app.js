@@ -91,6 +91,7 @@ function connectWS() {
     const msg = JSON.parse(ev.data);
     if (msg.type === "segment") { clearPartial(); addCaption(msg.ts, msg.text); }
     if (msg.type === "partial") showPartial(msg.text);
+    if (msg.type === "jp") addJapanese(msg.ts, msg.text);
     if (msg.type === "stt_fallback") { clearPartial(); addSummaryNote("ストリーミング接続が切れたため、ローカル文字起こしに切り替えました"); }
     if (msg.type === "summary") addSummary(msg.text);
     if (msg.type === "hq_done") loadSessions();
@@ -110,8 +111,25 @@ function addCaption(ts, text) {
   box.querySelector(".captions-empty")?.remove();
   const div = document.createElement("div");
   div.className = "caption";
+  div.dataset.ts = String(ts);
   div.innerHTML = `<span class="ts">${fmtTs(ts)}</span>${escapeHtml(text)}`;
   box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function addJapanese(ts, text) {
+  const box = $("captions");
+  const caption = box.querySelector(`.caption[data-ts="${ts}"]`);
+  const jp = document.createElement("div");
+  jp.className = "jp-line";
+  jp.textContent = text;
+  if (caption) caption.appendChild(jp);
+  else {
+    const div = document.createElement("div");
+    div.className = "caption";
+    div.appendChild(jp);
+    box.appendChild(div);
+  }
   box.scrollTop = box.scrollHeight;
 }
 

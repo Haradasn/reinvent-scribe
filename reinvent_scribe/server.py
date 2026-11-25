@@ -112,10 +112,36 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             wav = WavWriter(session.dir / "audio.wav")
             summarizer = RollingSummarizer(llm, settings.summary_interval_sec)
 
+            # Per-segment Japanese translation: a single worker keeps order
+            # and its failures never touch captions or recording.
+            jp_queue: queue.Queue = queue.Queue()
+
+            def _jp_worker() -> None:
+                while True:
+                    item = jp_queue.get()
+                    if item is None:
+                        return
+                    ts, text = item
+                    out = llm.chat([{"role": "user", "content":
+                                     "次の英語を自然な日本語に翻訳してください。"
+                                     "訳文のみを返すこと。\n\n" + text}],
+                                   max_tokens=300)
+                    if out:
+                        session.append_segment(ts, "(JA) " + out.strip())
+                        broadcast({"type": "jp", "ts": ts, "text": out.strip()})
+
+            jp_worker = None
+            if llm.available():
+                jp_worker = threading.Thread(target=_jp_worker, daemon=True,
+                                             name="jp-translate")
+                jp_worker.start()
+
             def on_segment(ts: float, text: str) -> None:
                 session.append_segment(ts, text)
                 summarizer.add(text)
                 broadcast({"type": "segment", "ts": ts, "text": text})
+                if jp_worker is not None:
+                    jp_queue.put((ts, text))
                 if summarizer.due():
                     threading.Thread(target=_run_summary, daemon=True).start()
 
@@ -194,8 +220,10 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                     status_code=503)
             worker.start()
             state["mic_ok"] = True
-            state["recording"] = Recording(session, mic, engine, wav,
-                                           summarizer, frame_queue, worker)
+            rec = Recording(session, mic, engine, wav,
+                            summarizer, frame_queue, worker)
+            rec.jp_queue, rec.jp_worker = jp_queue, jp_worker
+            state["recording"] = rec
             date = session.meta["started_at"][:10]
             return {"dirname": session.dir.name, "date": date,
                     "meta": session.meta}
@@ -210,6 +238,9 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         rec.mic.stop()
         rec.frame_queue.put(None)
         rec.worker.join(timeout=30)
+        if rec.jp_worker is not None:
+            rec.jp_queue.put(None)
+            rec.jp_worker.join(timeout=20)
         for part in rec.engine.values():
             if part is not None:
                 try:

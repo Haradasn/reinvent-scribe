@@ -196,3 +196,31 @@ def test_status_includes_active_session(client):
     assert status["session"]["dirname"] == r.json()["dirname"]
     client.post("/api/sessions/stop")
     assert client.get("/api/status").json()["session"] is None
+
+
+# --- per-segment Japanese translation (few seconds behind captions) ---
+
+def test_segments_get_japanese_translation(tmp_path):
+    class TranslatingLLM:
+        def available(self):
+            return True
+
+        def chat(self, messages, max_tokens=1000):
+            return "日本語訳です"
+
+    app = create_app(settings=Settings(data_dir=tmp_path),
+                     mic_factory=FakeMic, transcriber_factory=FakeTranscriber,
+                     transcribe_file_fn=fake_transcribe_file,
+                     llm=TranslatingLLM(), model_name="small.en")
+    with TestClient(app) as c:
+        r = c.post("/api/sessions", json={"session_id": "JP1", "title": "t", "memo": ""})
+        dirname, date = r.json()["dirname"], r.json()["date"]
+        deadline = time.time() + 3
+        text = ""
+        while time.time() < deadline:
+            text = (tmp_path / date / dirname / "transcript.md").read_text()
+            if "日本語訳です" in text:
+                break
+            time.sleep(0.05)
+        c.post("/api/sessions/stop")
+    assert "日本語訳です" in text
