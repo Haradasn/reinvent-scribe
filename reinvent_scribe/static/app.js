@@ -19,15 +19,19 @@ const today = () => {
 };
 
 /* ---------- status chips ---------- */
+const LLM_ERR = { busy: "混雑中(自動で再試行)", rate_limited: "利用上限", auth: "APIキーエラー", network: "接続なし" };
 async function refreshStatus() {
   try {
     const s = await (await fetch("/api/status")).json();
-    $("chip-model").textContent = `model: ${s.model}`;
-    setChip("chip-llm", `LLM: ${s.llm_ok ? "接続可" : "未設定"}`, s.llm_ok);
+    if (s.stt) setChip("chip-model", s.stt === "online" ? "字幕: オンライン" : "字幕: ローカル", s.stt === "online");
+    else { $("chip-model").textContent = "字幕: 待機中"; $("chip-model").className = "chip"; }
+    const ai = !s.llm_ok ? "未設定" : s.llm_error ? LLM_ERR[s.llm_error] || "エラー" : "正常";
+    setChip("chip-llm", `翻訳・要約: ${ai}`, s.llm_ok && !s.llm_error);
     setChip("chip-mic", `mic: ${s.mic_ok ? "OK" : "NG"}`, s.mic_ok);
     const badge = $("summary-badge");
-    badge.textContent = s.llm_ok ? "オンライン" : "オフライン(字幕のみ)";
-    badge.className = `badge ${s.llm_ok ? "online" : "offline"}`;
+    badge.textContent = ai;
+    badge.className = `badge ${s.llm_ok && !s.llm_error ? "online" : "offline"}`;
+    state.mailOk = s.mail_ok;
     syncRecordingState(s);
   } catch {}
 }
@@ -102,8 +106,10 @@ function connectWS() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if ((state.cleared || state.viewing) && ["segment", "partial", "jp", "summary"].includes(msg.type)) return;
-    if (msg.type === "segment") { clearPartial(); addCaption(msg.ts, msg.text); }
+    if ((state.cleared || state.viewing) && ["segment", "partial", "jp", "jp_failed", "summary"].includes(msg.type)) return;
+    if (msg.type.startsWith("jp") && msg.dirname !== state.current?.dirname) return;
+    if (msg.type === "jp_failed") { const p = pendingJp(msg.ts); if (p) p.textContent = "訳せませんでした(英語は保存済み)"; }
+    if (msg.type === "segment") { clearPartial(); addCaption(msg.ts, msg.text, msg.translating); }
     if (msg.type === "partial") showPartial(msg.text);
     if (msg.type === "jp") addJapanese(msg.ts, msg.text);
     if (msg.type === "stt_fallback") { clearPartial(); addSummaryNote("ストリーミング接続が切れたため、ローカル文字起こしに切り替えました"); }
@@ -120,18 +126,49 @@ function fmtTs(sec) {
     .map((v) => String(Math.floor(v)).padStart(2, "0")).join(":");
 }
 
-function addCaption(ts, text) {
+/* Follow new captions only while the reader is at the bottom */
+const follow = { on: true, last: 0, unseen: false };
+const capBox = $("captions");
+capBox.addEventListener("scroll", () => {
+  const gap = capBox.scrollHeight - capBox.clientHeight - capBox.scrollTop;
+  if (gap < 24) follow.on = true;
+  else if (capBox.scrollTop < follow.last) follow.on = false;
+  follow.last = capBox.scrollTop;
+  showLatestBtn();
+});
+function showLatestBtn() {
+  $("btn-latest").classList.toggle("hidden", follow.on || state.viewing);
+}
+function scrollToLatest(force) {
+  if (force) follow.on = true;
+  if (follow.on) capBox.scrollTop = capBox.scrollHeight;
+  showLatestBtn();
+}
+$("btn-latest").addEventListener("click", () => scrollToLatest(true));
+
+function addCaption(ts, text, translating) {
   const box = $("captions");
   box.querySelector(".captions-empty")?.remove();
   const div = document.createElement("div");
   div.className = "caption";
   div.dataset.ts = String(ts);
   div.innerHTML = `<span class="ts">${fmtTs(ts)}</span>${escapeHtml(text)}`;
+  if (translating) {
+    const p = document.createElement("div");
+    p.className = "jp-pending";
+    p.textContent = "翻訳中…";
+    div.appendChild(p);
+  }
   box.appendChild(div);
-  box.scrollTop = box.scrollHeight;
+  scrollToLatest();
+}
+
+function pendingJp(ts) {
+  return capBox.querySelector(`.caption[data-ts="${ts}"] .jp-pending`);
 }
 
 function addJapanese(ts, text) {
+  pendingJp(ts)?.remove();
   const box = $("captions");
   const caption = [...box.querySelectorAll(`.caption[data-ts="${ts}"]`)]
     .find((c) => !c.querySelector(".jp-line"));
@@ -145,7 +182,7 @@ function addJapanese(ts, text) {
     div.appendChild(jp);
     box.appendChild(div);
   }
-  box.scrollTop = box.scrollHeight;
+  scrollToLatest();
 }
 
 function addSummary(text, label) {
@@ -169,7 +206,7 @@ function showPartial(text) {
     box.appendChild(el);
   }
   el.textContent = text;
-  box.scrollTop = box.scrollHeight;
+  scrollToLatest();
 }
 
 function clearPartial() {
@@ -226,6 +263,7 @@ function clearScreen() {
   state.viewing = false;
   $("rec-title").textContent = "待機中";
   $("chat-target").textContent = "";
+  scrollToLatest(true);
   markSelected();
   $("btn-clear").classList.add("hidden");
 }
@@ -320,6 +358,7 @@ async function doStart(payload) {
   $("chat-target").textContent = label;
   setDate(data.meta.schedule_date || data.date);
   loadSessions();
+  refreshStatus();
 }
 
 $("btn-stop").addEventListener("click", async () => {
@@ -415,9 +454,12 @@ function recordingRow(s) {
     `<span class="sid">${escapeHtml(s.meta.id)}</span>` +
     `<span class="row-main">${s.meta.schedule_key ? `録音 ${escapeHtml(s.meta.started_at.slice(11, 16))}` : escapeHtml(s.meta.title)}</span>` +
     (s.meta.test ? '<span class="tag">テスト</span>' : "") + status +
-    `<button class="memo-btn" title="メモ編集">✎</button>` +
+    (active ? "" :
+      `<a class="memo-btn" title="音声をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/audio">♪⤓</a>` +
+      `<a class="memo-btn" title="文字起こしCSVをダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/transcript.csv">CSV⤓</a>`) +
+    `<button class="memo-btn memo-edit" title="メモ編集">✎</button>` +
     `<button class="memo-btn del-btn" title="削除">🗑</button>`;
-  li.querySelector(".memo-btn").onclick = () => openMemo(s);
+  li.querySelector(".memo-edit").onclick = () => openMemo(s);
   li.querySelector(".del-btn").onclick = async () => {
     if (!confirm(`[${s.meta.id}] ${s.meta.title} を削除しますか?(録音・文字起こしも消えます)`)) return;
     const date = s.meta.started_at.slice(0, 10);
@@ -465,6 +507,7 @@ async function openSession(date, dirname) {
   if (d.summary) addSummary(d.summary, "保存済みの要約");
   else setPlaceholder("summaries", "この録音の要約はありません");
   $("captions").scrollTop = 0;
+  showLatestBtn();
   $("btn-clear").classList.remove("hidden");
 }
 
@@ -497,6 +540,8 @@ function showReport(tab = report.tab) {
   $("tab-md").setAttribute("aria-selected", tab === "md");
   $("report-body").textContent = report[tab];
   $("btn-copy").disabled = !report[tab];
+  $("btn-mail").disabled = !report.md || !state.mailOk;
+  $("mail-note").textContent = state.mailOk ? "" : ".env に Gmail の設定が必要です(README参照)";
 }
 $("tab-slack").addEventListener("click", () => showReport("slack"));
 $("tab-md").addEventListener("click", () => showReport("md"));
@@ -512,9 +557,12 @@ $("btn-regen").addEventListener("click", async () => {
   try { localStorage.setItem("mention", mention); } catch {}
   $("btn-regen").disabled = true;
   $("btn-copy").disabled = true;
+  $("btn-mail").disabled = true;
+  report.slack = report.md = "";
+  const date = $("list-date").value || today();
   $("report-body").textContent = "生成中…";
   try {
-    const r = await fetch(`/api/daily-report?date=${$("list-date").value || today()}`, {
+    const r = await fetch(`/api/daily-report?date=${date}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mention }),
@@ -523,6 +571,7 @@ $("btn-regen").addEventListener("click", async () => {
     const data = await r.json();
     report.slack = data.slack;
     report.md = data.markdown;
+    report.date = date;
     showReport();
   } catch {
     $("report-body").textContent = "生成に失敗しました";
@@ -537,6 +586,29 @@ $("btn-copy").addEventListener("click", async () => {
     $("btn-copy").textContent = "コピーできませんでした";
   }
   setTimeout(() => ($("btn-copy").textContent = "コピー"), 1500);
+});
+try { $("f-to").value = localStorage.getItem("mailTo") || ""; } catch {}
+$("btn-mail").addEventListener("click", async () => {
+  const to = $("f-to").value.trim();
+  const note = $("mail-note");
+  if (!to) { note.textContent = "宛先を入力してください"; return; }
+  const csv = $("f-csv").checked;
+  if (!confirm(`${to} に ${report.date} の日報を送信しますか?${csv ? "\n(文字起こしCSVを添付)" : ""}`)) return;
+  try { localStorage.setItem("mailTo", to); } catch {}
+  $("btn-mail").disabled = true;
+  note.textContent = "送信中…";
+  try {
+    const r = await fetch(`/api/daily-report/send?date=${report.date}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to, subject: `re:Invent 出張日報 ${report.date}`, body: report.md, attach_csv: csv }),
+    });
+    const d = await r.json();
+    note.textContent = r.ok ? `送信しました ✓${d.attachments ? `(CSV ${d.attachments}件)` : ""}` : d.error || "送信に失敗しました";
+  } catch {
+    note.textContent = "送信できたか確認できません。Gmail の送信済みを確認してください";
+  }
+  $("btn-mail").disabled = false;
 });
 $("btn-report-close").addEventListener("click", () => $("report-modal").close());
 
@@ -554,14 +626,18 @@ $("chat-form").addEventListener("submit", async (e) => {
   const view = state.viewId;
   addChat("user", q);
   const typing = addChat("assistant typing", "考え中");
-  const r = await fetch(`/api/sessions/${target.date}/${target.dirname}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question: q }),
-  });
-  const data = await r.json().catch(() => ({}));
+  let r = { ok: false }, data = {};
+  try {
+    r = await fetch(`/api/sessions/${target.date}/${target.dirname}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: q }),
+    });
+    data = await r.json();
+  } catch {}
   typing.remove();
   if (view !== state.viewId) return; // screen was cleared; reply is in chat.md
+  if (!r.ok && !$("chat-input").value) $("chat-input").value = q; // ready to resend
   addChat("assistant", r.ok ? data.answer : (data.error || "エラーが発生しました"));
 });
 
@@ -607,6 +683,43 @@ async function refreshSchedule() {
   renderChips();
   renderHero();
 }
+
+/* Refresh from the re:Invent calendar through the bundled Chrome extension */
+let syncTimer = null;
+function syncNote(text, done) {
+  $("sync-note").textContent = text;
+  $("btn-sync").disabled = !done;
+  clearTimeout(syncTimer);
+}
+$("btn-sync").addEventListener("click", () => {
+  syncNote("予定を読み込み中…");
+  syncTimer = setTimeout(() => syncNote("Chrome拡張が必要です(README参照。導入後はこの画面を再読み込み)", true), 1500);
+  window.postMessage({ type: "scribe-sync" }, location.origin);
+});
+window.addEventListener("message", async (ev) => {
+  if (ev.source !== window) return;
+  if (ev.data?.type === "scribe-sync-ack") {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => syncNote("時間切れです。もう一度お試しください", true), 120000);
+  }
+  if (ev.data?.type !== "scribe-sync-result") return;
+  if (ev.data.error) return syncNote(ev.data.error, true);
+  const send = (force) => fetch("/api/schedule/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items: ev.data.items, force }),
+  });
+  try {
+    let r = await send(false), d = await r.json();
+    if (d.confirm && confirm(`${d.error}更新しますか?`)) { r = await send(true); d = await r.json(); }
+    if (!r.ok) return syncNote(d.error || "更新できませんでした", true);
+    syncNote(`${d.total}件・追加${d.added.length} 変更${d.changed.length} 削除${d.removed.length}`, true);
+    await refreshSchedule();
+    loadSessions();
+  } catch {
+    syncNote("更新できませんでした", true);
+  }
+});
 
 function renderChips() {
   const box = $("day-chips");
@@ -683,6 +796,6 @@ $("list-date").addEventListener("change", () => setDate($("list-date").value));
 refreshSchedule();
 setInterval(refreshSchedule, 30000);
 refreshStatus();
-setInterval(refreshStatus, 10000);
+setInterval(refreshStatus, 4000);
 loadSessions();
 setInterval(loadSessions, 15000); // fallback when WS is unavailable

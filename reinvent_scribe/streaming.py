@@ -28,6 +28,7 @@ class AssemblyAIStreamer:
         self._receiver: threading.Thread | None = None
         self._buf = bytearray()
         self._terminated = threading.Event()
+        self._split_turn = None  # turn already asked to end
 
     # AAI v3 rejects audio chunks shorter than 50ms; batch to >=80ms
     _MIN_SEND_BYTES = int(16000 * 0.08) * 2
@@ -72,6 +73,26 @@ class AssemblyAIStreamer:
             self.on_segment(start_sec, transcript)
         else:
             self.on_partial(transcript)
+            self._split_long_turn(msg, transcript)
+
+    # A speaker who never pauses would otherwise hold one turn open for 40s+,
+    # and translation only starts once the turn is final.
+    _SOFT_TURN_MS = 8000    # end at the next sentence boundary
+    _HARD_TURN_MS = 20000   # end regardless
+
+    def _split_long_turn(self, msg: dict, transcript: str) -> None:
+        words = msg.get("words") or []
+        turn = msg.get("turn_order")
+        if not words or turn is None or turn == self._split_turn or self._ws is None:
+            return
+        length = words[-1].get("end", 0) - words[0].get("start", 0)
+        if length >= self._HARD_TURN_MS or (
+                length >= self._SOFT_TURN_MS and transcript[-1] in ".?!"):
+            self._split_turn = turn
+            try:
+                self._ws.send(json.dumps({"type": "ForceEndpoint"}))
+            except Exception:
+                log.info("could not split a long turn")
 
     def feed(self, pcm: np.ndarray) -> None:
         self._buf.extend(np.asarray(pcm, dtype=np.int16).tobytes())

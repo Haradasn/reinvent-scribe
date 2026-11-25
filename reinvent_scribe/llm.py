@@ -1,4 +1,5 @@
 import logging
+import time
 
 import httpx
 
@@ -9,13 +10,19 @@ log = logging.getLogger(__name__)
 _HEAD_CHARS = 2000
 _TAIL_CHARS = 6000
 
+# tried in order when the configured model is overloaded (503/429/timeout)
+_GEMINI_FALLBACKS = "gemini-3.6-flash,gemini-3.5-flash"
+_PREFER_SEC = 120
+
 
 class LLMClient:
     """OpenAI-compatible Chat Completions client. Never raises from chat()."""
 
-    def __init__(self, settings: Settings, timeout: float = 15.0):
+    def __init__(self, settings: Settings, timeout: float = 10.0):
         self.settings = settings
         self._client = httpx.Client(timeout=timeout)
+        self._preferred = (None, 0.0)
+        self.last_error: str | None = None
 
     def available(self) -> bool:
         s = self.settings
@@ -24,23 +31,61 @@ class LLMClient:
     def chat(self, messages: list[dict], max_tokens: int = 1000) -> str | None:
         if not self.available():
             return None
-        url = self.settings.llm_base_url.rstrip("/") + "/chat/completions"
+        last_error = "unavailable"
+        for model in self._model_order():
+            out, last_error, retryable = self._request(model, messages, max_tokens)
+            if out:
+                self._preferred = (model, time.monotonic() + _PREFER_SEC)
+                self.last_error = None
+                return out
+            if not retryable:
+                break
+        self.last_error = last_error
+        return None
+
+    def _models(self) -> list[str]:
+        s = self.settings
+        extra = s.llm_fallback_models
+        if extra is None:
+            extra = _GEMINI_FALLBACKS if "googleapis.com" in s.llm_base_url else ""
+        names = [s.llm_model, *(m.strip() for m in extra.split(","))]
+        return list(dict.fromkeys(m for m in names if m))
+
+    def _model_order(self) -> list[str]:
+        models = self._models()
+        model, until = self._preferred
+        if model in models and time.monotonic() < until:
+            models.remove(model)
+            models.insert(0, model)  # skip the overloaded one for a while
+        return models
+
+    def _request(self, model, messages, max_tokens):
+        """-> (text, error, worth trying another model)"""
+        s = self.settings
         try:
             resp = self._client.post(
-                url,
-                headers={"Authorization": f"Bearer {self.settings.llm_api_key}"},
-                json={"model": self.settings.llm_model,
-                      "messages": messages,
+                s.llm_base_url.rstrip("/") + "/chat/completions",
+                headers={"Authorization": f"Bearer {s.llm_api_key}"},
+                json={"model": model, "messages": messages,
                       "max_tokens": max_tokens},
             )
             if resp.status_code != 200:
-                log.warning("LLM API returned %d: %s", resp.status_code,
+                log.warning("LLM %s returned %d: %s", model, resp.status_code,
                             resp.text[:200])
-                return None
-            return resp.json()["choices"][0]["message"]["content"]
+                error = {503: "busy", 429: "rate_limited", 401: "auth",
+                         403: "auth"}.get(resp.status_code, "error")
+                return None, error, error != "auth"
+            out = resp.json()["choices"][0]["message"].get("content")
+            return out, "error", True
+        except httpx.TimeoutException:
+            log.warning("LLM %s timed out", model)
+            return None, "busy", True
+        except httpx.TransportError as e:
+            log.warning("LLM unreachable: %r", e)
+            return None, "network", False
         except Exception:
             log.warning("LLM request failed", exc_info=True)
-            return None
+            return None, "error", True
 
 
 def _clip_transcript(transcript: str) -> str:

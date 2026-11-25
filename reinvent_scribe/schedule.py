@@ -1,5 +1,7 @@
 import csv
+import io
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -45,3 +47,31 @@ def load_schedule(path: Path) -> list[dict]:
             })
     rank = {"reserved": 0, "favorite": 1}
     return sorted(items, key=lambda i: (i["date"], i["start"], rank.get(i["kind"], 2)))
+
+
+FIELDS = ["date", "start", "end", "id", "title", "venue", "kind"]
+
+
+def save_schedule(path: Path, items: list[dict]) -> dict:
+    """Replace sessions.csv (keeping a .bak) and report what changed."""
+    path = Path(path)
+    old = load_schedule(path)
+    ids = {(i["date"], i["title"]): i["id"] for i in old
+           if not re.fullmatch(r"(MON|TUE|WED|THU|FRI|SAT|SUN)\d{4}", i["id"])}
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, FIELDS, lineterminator="\n")
+    w.writeheader()
+    for i in items:
+        w.writerow({**i, "id": ids.get((i["date"], i["title"]), "")})
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(buf.getvalue(), encoding="utf-8")
+    new = load_schedule(tmp)
+    if path.exists():
+        os.replace(path, path.with_name(path.name + ".bak"))
+    os.replace(tmp, path)
+
+    a, b = ({i["key"]: i for i in x} for x in (old, new))
+    return {"total": len(b),
+            "added": [b[k]["title"] for k in b if k not in a],
+            "removed": [a[k]["title"] for k in a if k not in b],
+            "changed": [b[k]["title"] for k in b if k in a and a[k] != b[k]]}

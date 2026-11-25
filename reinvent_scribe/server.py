@@ -3,20 +3,24 @@ import logging
 import queue
 import re
 import shutil
+import smtplib
 import threading
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .audio import MicStream, WavWriter
 from .config import Settings
-from .schedule import load_schedule
+from .mail import build_message, send_gmail
+from .schedule import load_schedule, save_schedule
 from .llm import LLMClient, transcript_chat
 from .store import SessionStore
 from .summarize import RollingSummarizer, build_daily_report, build_slack_post
@@ -43,6 +47,28 @@ class MemoBody(BaseModel):
 
 class ReportBody(BaseModel):
     mention: str = ""
+
+
+class MailBody(BaseModel):
+    to: str
+    subject: str
+    body: str
+    attach_csv: bool = False
+
+
+class ScheduleItem(BaseModel):
+    month: int
+    day: int
+    start: str
+    end: str
+    title: str
+    venue: str = ""
+    kind: str = "reserved"
+
+
+class ScheduleBody(BaseModel):
+    items: list[ScheduleItem]
+    force: bool = False
 
 
 class ChatBody(BaseModel):
@@ -77,7 +103,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                transcriber_factory=Transcriber,
                transcribe_file_fn=transcribe_file, llm: LLMClient | None = None,
                model_name: str | None = None, streamer_factory="auto",
-               event_now=None) -> FastAPI:
+               event_now=None, mail_sender=send_gmail) -> FastAPI:
     settings = settings or Settings.from_env()
     if event_now is None:
         tz = ZoneInfo(settings.event_tz)
@@ -109,6 +135,9 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         yield
 
     app = FastAPI(lifespan=lifespan)
+    # this app can send mail: refuse requests that reach it via another name
+    app.add_middleware(TrustedHostMiddleware,
+                       allowed_hosts=["127.0.0.1", "localhost", "testserver"])
     state = {"recording": None, "mic_ok": True, "hq_pending": []}
     ws_clients: set[WebSocket] = set()
     loop_holder = {}
@@ -153,19 +182,40 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             jp_queue: queue.Queue = queue.Queue()
 
             def _jp_worker() -> None:
+                retry: list = []
                 while True:
-                    item = jp_queue.get()
+                    try:
+                        item = jp_queue.get(timeout=3 if retry else None)
+                    except queue.Empty:  # idle: revisit what failed earlier
+                        item = retry.pop(0)
                     if item is None:
+                        for left in retry:
+                            _translate(*left[:2], last=True)
                         return
-                    ts, text = item
+                    ts, text, tries = item
+                    if not _translate(ts, text, last=tries >= 4) and tries < 4:
+                        retry.append((ts, text, tries + 1))
+
+            def _translate(ts, text, last) -> bool:
+                try:
                     out = llm.chat([{"role": "user", "content":
                                      "次の発言を自然な日本語に翻訳してください。"
                                      "すでに日本語ならそのまま返すこと。"
                                      "訳文のみを返すこと。\n\n" + text}],
-                                   max_tokens=300)
+                                   max_tokens=1000)
                     if out:
-                        session.append_segment(ts, "(JA) " + out.strip())
-                        broadcast({"type": "jp", "ts": ts, "text": out.strip()})
+                        # one line: it may be saved after later captions
+                        out = " ".join(out.split("\n")).strip()
+                        session.append_segment(ts, "(JA) " + out)
+                        broadcast({"type": "jp", "ts": ts, "text": out,
+                                   "dirname": session.dir.name})
+                        return True
+                except Exception:
+                    log.exception("translation failed")
+                if last:
+                    broadcast({"type": "jp_failed", "ts": ts,
+                               "dirname": session.dir.name})
+                return False
 
             jp_worker = None
             if llm.available():
@@ -176,9 +226,10 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             def on_segment(ts: float, text: str) -> None:
                 session.append_segment(ts, text)
                 summarizer.add(text)
-                broadcast({"type": "segment", "ts": ts, "text": text})
+                broadcast({"type": "segment", "ts": ts, "text": text,
+                           "translating": jp_worker is not None})
                 if jp_worker is not None:
-                    jp_queue.put((ts, text))
+                    jp_queue.put((ts, text, 0))
                 if summarizer.due():
                     threading.Thread(target=_run_summary, daemon=True).start()
 
@@ -308,15 +359,16 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             if part is not None:
                 _step(name, part.stop)
         if rec.jp_worker is not None:
-            rec.jp_queue.put(None)
-            rec.jp_worker.join(timeout=20)
+            rec.jp_queue.put(None)  # drained in the background
         _step("wav", rec.wav.close)
         rec.session.finalize()
         state["hq_pending"].append(rec.session.dir.name)
 
         def _hq():
-            # summarizing waits on the network, so it must not delay stop
+            # translating and summarizing wait on the network: never delay stop
             try:
+                if rec.jp_worker is not None:
+                    rec.jp_worker.join(timeout=60)
                 tail = rec.summarizer.summarize()
                 if tail:
                     broadcast({"type": "summary", "text": tail,
@@ -414,7 +466,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         answer = transcript_chat(llm, transcript, history=session.chat_history()[-20:],
                                  question=body.question)
         if answer is None:
-            return JSONResponse({"error": "LLM 呼び出しに失敗しました。"},
+            return JSONResponse({"error": "AIサービスが混雑しているか、接続できません。もう一度送信してください。"},
                                 status_code=502)
         session.append_chat("user", body.question)
         session.append_chat("assistant", answer)
@@ -433,6 +485,73 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         (day_dir / "daily_slack.txt").write_text(slack, encoding="utf-8")
         return {"markdown": md, "slack": slack}
 
+    @app.post("/api/daily-report/send")
+    def send_report(date: str, body: MailBody):
+        _check_date(date)
+        if not (settings.gmail_address and settings.gmail_app_password):
+            return JSONResponse({"error": ".env に GMAIL_ADDRESS と GMAIL_APP_PASSWORD を設定し、アプリを再起動してください。"},
+                                status_code=503)
+        if not body.body.strip():
+            return JSONResponse({"error": "先に日報を生成してください。"}, status_code=422)
+        files = []
+        if body.attach_csv:
+            files = [(f"{s.dir.name}.csv", s.transcript_csv())
+                     for s in store.list_for_date(date)]
+        try:
+            msg = build_message(settings.gmail_address, body.to, body.subject,
+                                body.body, files)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=422)
+        try:
+            mail_sender(settings.gmail_address, settings.gmail_app_password, msg)
+        except smtplib.SMTPAuthenticationError:
+            return JSONResponse({"error": "Gmail にログインできません。アプリパスワードを確認してください。"},
+                                status_code=502)
+        except Exception as e:
+            log.warning("mail send failed: %s", type(e).__name__)
+            return JSONResponse({"error": "送信できたか確認できません。Gmail の送信済みを確認してください。"},
+                                status_code=502)
+        return {"ok": True, "attachments": len(files)}
+
+    @app.get("/api/sessions/{date}/{dirname}/audio")
+    def download_audio(date: str, dirname: str):
+        s = _get_session(date, dirname)
+        rec: Recording | None = state["recording"]
+        if rec is not None and rec.session.dir == s.dir:
+            return JSONResponse({"error": "録音を停止してからダウンロードしてください"},
+                                status_code=409)
+        if not (s.dir / "audio.wav").exists():
+            return JSONResponse({"error": "音声がありません"}, status_code=404)
+        return FileResponse(s.dir / "audio.wav", media_type="audio/wav",
+                            filename=f"{s.dir.name}.wav")
+
+    @app.get("/api/sessions/{date}/{dirname}/transcript.csv")
+    def download_csv(date: str, dirname: str):
+        s = _get_session(date, dirname)
+        return Response(s.transcript_csv().encode("utf-8-sig"), media_type="text/csv",
+                        headers={"Content-Disposition":
+                                 f"attachment; filename*=UTF-8''{quote(s.dir.name)}.csv"})
+
+    @app.post("/api/schedule/import")
+    def import_schedule(body: ScheduleBody):
+        year, items = event_now().year, []
+        for i in body.items:
+            try:
+                begin = datetime.strptime(f"{year}-{i.month}-{i.day} {i.start}", "%Y-%m-%d %H:%M")
+                end = datetime.strptime(f"{year}-{i.month}-{i.day} {i.end}", "%Y-%m-%d %H:%M")
+            except ValueError:
+                begin = end = datetime.min
+            if end <= begin or not i.title.strip():
+                return JSONResponse({"error": "読み取った予定に不正な値があるため、更新しませんでした。"},
+                                    status_code=422)
+            items.append({"date": f"{begin:%Y-%m-%d}", "start": i.start, "end": i.end,
+                          "title": i.title, "venue": i.venue, "kind": i.kind})
+        before = len(load_schedule(SCHEDULE_CSV))
+        if not items or (len(items) < before / 2 and not body.force):
+            return JSONResponse({"error": f"予定が {before} 件から {len(items)} 件に減ります。",
+                                 "confirm": bool(items)}, status_code=409)
+        return save_schedule(SCHEDULE_CSV, items)
+
     @app.get("/api/sessions/{date}/{dirname}")
     def session_detail(date: str, dirname: str):
         s = _get_session(date, dirname)
@@ -450,6 +569,10 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         return {"recording": rec is not None, "session": session,
                 "paused": rec.paused if rec else False,
                 "mic_ok": state["mic_ok"], "llm_ok": llm.available(),
+                "mail_ok": bool(settings.gmail_address and settings.gmail_app_password),
+                "llm_error": getattr(llm, "last_error", None),
+                "stt": None if rec is None else
+                       "online" if rec.engine["streamer"] else "local",
                 "model": model, "hq_pending": list(state["hq_pending"])}
 
     @app.get("/api/schedule")

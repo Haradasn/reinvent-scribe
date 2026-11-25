@@ -41,7 +41,8 @@ OpenAI 互換の Chat Completions API ならどこでも使えます。安いモ
 export LLM_BASE_URL="https://api.openai.com/v1"
 export LLM_API_KEY="sk-..."
 export LLM_MODEL="gpt-4o-mini"
-export SUMMARY_INTERVAL_SEC=180   # 準リアルタイム要約の間隔(任意)
+export SUMMARY_INTERVAL_SEC=30    # 準リアルタイム要約の間隔(任意)
+export LLM_FALLBACK_MODELS="a,b"  # 任意: 混雑時に順に試すモデル(Gemini は既定あり、空文字で無効)
 export ASSEMBLYAI_API_KEY="..."   # 任意: 設定すると字幕が低遅延ストリーミングに
                                   # ($0.15/時〜。切断時はローカルに自動フォールバック)
 export DATA_DIR=data              # 保存先(任意)
@@ -73,6 +74,27 @@ date,start,end,id,title,venue,kind
 - `id` は空でよい(曜日+開始時刻になります)。`kind` は reserved / favorite / personal
 - カンマを含む項目は `"` で囲む。保存後30秒以内に画面へ反映されます
 - 予定日以外に録音すると「テスト」扱いになり、予定は録音済みになりません
+
+### 「予定を更新」ボタン(Chrome 拡張)
+
+re:Invent サイトにログイン済みの Chrome なら、ボタン1つで予定を取り込めます。初回だけ:
+
+1. Chrome で `chrome://extensions` を開き、右上の「デベロッパー モード」をオン
+2. 「パッケージ化されていない拡張機能を読み込む」→ このリポジトリの `extension` フォルダを選択
+3. アプリの画面を再読み込み
+
+拡張機能はボタンを押した時だけカレンダーを開き、日付を切り替えて読むだけです(予約は変更しません)。
+以前の予定は `sessions.csv.bak` に残ります。re:Invent 側の画面が変わると読めなくなることがあります。
+
+## 日報を Gmail で送る
+
+`.env` に次を設定して再起動します。アプリパスワードは Google アカウント(2段階認証が必要)で発行します。
+会社の Google Workspace では管理者が無効にしている場合があります。
+
+```
+GMAIL_ADDRESS=you@example.com
+GMAIL_APP_PASSWORD=...
+```
 
 ## glossary.txt(AWS 用語の認識精度向上)
 

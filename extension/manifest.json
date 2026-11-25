@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "re:Invent Scribe schedule sync",
+  "version": "1.0",
+  "description": "Reads your own re:Invent calendar (view only) when you press the button in re:Invent Scribe.",
+  "permissions": ["scripting"],
+  "host_permissions": ["https://aws.amazon.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    { "matches": ["http://127.0.0.1/*", "http://localhost/*"], "js": ["bridge.js"] }
+  ]
+}

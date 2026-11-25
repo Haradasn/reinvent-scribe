@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<meta name="application-name" content="reinvent-scribe">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>re:Invent Scribe</title>
 <link rel="stylesheet" href="/static/style.css">
@@ -15,8 +16,8 @@
     <h1>re:Invent <em>Scribe</em></h1>
   </div>
   <div class="status-chips">
-    <span id="chip-model" class="chip">model: –</span>
-    <span id="chip-llm" class="chip">LLM: –</span>
+    <span id="chip-model" class="chip">字幕: –</span>
+    <span id="chip-llm" class="chip">翻訳・要約: –</span>
     <span id="chip-mic" class="chip">mic: –</span>
   </div>
 </header>
@@ -46,6 +47,7 @@
       <div class="captions-empty">録音を開始すると、ここに英語字幕が流れます</div>
     </div>
     <div class="panel-foot">
+      <button id="btn-latest" class="latest-btn hidden">↓ 最新の字幕へ</button>
       <button id="btn-clear" class="ghost-btn hidden">画面をクリア(データは保存済み)</button>
     </div>
   </section>
@@ -76,6 +78,8 @@
   <section class="panel glass">
     <div class="panel-head">
       <input id="list-date" class="date-input" type="date" aria-label="表示する日付">
+      <span id="sync-note" class="sync-note" role="status"></span>
+      <button id="btn-sync" class="ghost-btn" title="re:Invent のカレンダーから予定を読み込む">⟳ 予定を更新</button>
       <button id="btn-report" class="ghost-btn">日報生成</button>
     </div>
     <div id="day-chips" class="day-chips"></div>
@@ -106,6 +110,12 @@
     <button id="tab-md" class="ghost-btn" role="tab">日報(Markdown)</button>
   </div>
   <pre id="report-body" class="report-body"></pre>
+  <div class="mail-box">
+    <label>メール宛先 <input id="f-to" type="email" multiple placeholder="manager@example.com" autocomplete="off"></label>
+    <label class="check"><input id="f-csv" type="checkbox"> 文字起こしCSV(英語+日本語訳)を添付</label>
+    <button id="btn-mail" class="primary-btn">Gmailで送信</button>
+    <span id="mail-note" role="status"></span>
+  </div>
   <div class="modal-actions">
     <button id="btn-regen" class="ghost-btn">生成する</button>
     <button id="btn-copy" class="primary-btn">コピー</button>

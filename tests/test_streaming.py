@@ -231,3 +231,51 @@ def test_stop_does_not_wait_for_slow_summary(tmp_path):
                 break
             time.sleep(0.05)
     assert list(tmp_path.glob("*/*/summary.md"))
+
+
+def partial(end, text, turn=0):
+    return json.dumps({"type": "Turn", "transcript": text, "end_of_turn": False,
+                       "turn_order": turn, "words": [{"start": 0, "end": end}]})
+
+
+def test_long_turn_is_split_once_at_sentence_end():
+    s = AssemblyAIStreamer(api_key="k", on_segment=lambda ts, t: None)
+    s._ws = SentWS()
+    s._handle(partial(5000, "Short."))
+    s._handle(partial(9000, "Still in the middle"))
+    assert s._ws.sent == []
+    s._handle(partial(10000, "Done now."))
+    s._handle(partial(11000, "Done now. Next."))
+    assert len(s._ws.sent) == 1
+    s._handle(partial(21000, "no punctuation", turn=1))
+    assert len(s._ws.sent) == 2
+
+
+def test_failed_translation_is_retried(tmp_path):
+    import time
+
+    class Flaky:
+        n = 0
+
+        def available(self):
+            return True
+
+        def chat(self, messages, max_tokens=1000):
+            if "翻訳" in str(messages):
+                Flaky.n += 1
+                return None if Flaky.n == 1 else "こん\nにちは"
+            return "x"
+
+    app = create_app(settings=Settings(data_dir=tmp_path), mic_factory=FakeMic,
+                     transcriber_factory=FakeTranscriber,
+                     transcribe_file_fn=fake_transcribe_file, llm=Flaky(),
+                     model_name="x", streamer_factory=None)
+    with TestClient(app) as c:
+        c.post("/api/sessions", json={"session_id": "Q", "title": "t"})
+        assert c.get("/api/status").json()["stt"] == "local"
+        c.post("/api/sessions/stop")
+        for _ in range(100):
+            if not c.get("/api/status").json()["hq_pending"]:
+                break
+            time.sleep(0.05)
+    assert "(JA) こん にちは" in next(tmp_path.glob("*/*/transcript.md")).read_text()

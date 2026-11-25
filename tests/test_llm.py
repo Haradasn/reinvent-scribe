@@ -63,3 +63,34 @@ def test_transcript_chat_truncates_long_transcript():
     system = captured["body"]["messages"][0]["content"]
     assert "HEAD" in system and "TAIL" in system
     assert len(system) < 12000
+
+
+def test_overloaded_model_falls_back_and_is_skipped_next_time():
+    import json
+    tried = []
+
+    def handler(request):
+        m = json.loads(request.content)["model"]
+        tried.append(m)
+        if m == "gpt-4o-mini":
+            return httpx.Response(503, text="high demand")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    c = client_with(handler)
+    c.settings.llm_fallback_models = "backup"
+    assert c.chat([]) == "ok" and c.chat([]) == "ok"
+    assert tried == ["gpt-4o-mini", "backup", "backup"]
+    assert c.last_error is None
+
+
+def test_error_is_reported_and_bad_key_is_not_retried():
+    n = []
+
+    def handler(request):
+        n.append(1)
+        return httpx.Response(401)
+
+    c = client_with(handler)
+    c.settings.llm_fallback_models = "backup"
+    assert c.chat([]) is None
+    assert c.last_error == "auth" and len(n) == 1

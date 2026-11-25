@@ -24,8 +24,11 @@ class Settings:
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
+    llm_fallback_models: str | None = None  # comma separated; None = provider default
     assemblyai_api_key: str | None = None
-    summary_interval_sec: int = 180
+    gmail_address: str | None = None
+    gmail_app_password: str | None = None
+    summary_interval_sec: int = 30
     event_tz: str = "America/Los_Angeles"
 
     @classmethod
@@ -37,7 +40,10 @@ class Settings:
             llm_base_url=os.environ.get("LLM_BASE_URL"),
             llm_api_key=os.environ.get("LLM_API_KEY"),
             llm_model=os.environ.get("LLM_MODEL"),
+            gmail_address=os.environ.get("GMAIL_ADDRESS"),
+            gmail_app_password=os.environ.get("GMAIL_APP_PASSWORD"),
+            llm_fallback_models=os.environ.get("LLM_FALLBACK_MODELS"),
             assemblyai_api_key=os.environ.get("ASSEMBLYAI_API_KEY"),
             event_tz=os.environ.get("EVENT_TZ", "America/Los_Angeles"),
-            summary_interval_sec=int(os.environ.get("SUMMARY_INTERVAL_SEC", "180")),
+            summary_interval_sec=int(os.environ.get("SUMMARY_INTERVAL_SEC", "30")),
         )

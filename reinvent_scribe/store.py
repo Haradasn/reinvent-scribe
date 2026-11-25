@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import re
 from datetime import datetime
@@ -80,6 +82,14 @@ class Session:
                 if target:
                     target["ja"] += "\n" + line
         return out
+
+    def transcript_csv(self) -> str:
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["時刻", "英語", "日本語訳"])
+        for s in self.segments():
+            w.writerow([_fmt_ts(s["ts"]), s["text"], s["ja"]])
+        return buf.getvalue()
 
     def best_transcript(self) -> str:
         hq = self.dir / "transcript_hq.md"
