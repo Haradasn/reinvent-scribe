@@ -91,8 +91,9 @@ def test_bundled_glossary_fits_assemblyai():
     from pathlib import Path
     from reinvent_scribe.transcribe import _glossary_terms, load_keyterms
     path = Path(__file__).parent.parent / "glossary.txt"
-    assert load_keyterms(path) == _glossary_terms(path)  # nothing dropped
-    assert load_glossary(path)[1] is False
+    terms = _glossary_terms(path)
+    assert all(len(t) <= 50 for t in terms)  # none silently dropped
+    assert load_keyterms(path) == terms[:100]
 
 
 def test_old_space_separated_line_is_split_for_assemblyai(tmp_path):

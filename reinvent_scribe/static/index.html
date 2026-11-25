@@ -178,21 +178,21 @@
 <dialog id="setup-modal" class="modal glass wide setup-modal" aria-labelledby="setup-title">
   <div class="modal-head"><h2 id="setup-title">設定</h2>
     <button class="icon-btn" data-close aria-label="閉じる" title="閉じる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-  <p class="setup-lead">録音と英語字幕は、1と2だけで使えます。キーはこの PC にだけ保存され、保存後に画面へ表示されることはありません。</p>
+  <p class="setup-lead">録音と英語字幕は1と2だけで使えます。キーはこの PC にだけ保存され、保存後に画面へ表示されることはありません。</p>
 
   <details class="setup-card" data-step="mic"><summary><b>1. マイク</b><span class="setup-state"></span></summary>
     <p>押してから2秒間、話しかけてください。許可を求められたら「許可」を選びます。</p>
     <button class="primary-btn" data-test="mic">マイクを確認</button><p class="setup-note" role="status"></p></details>
 
   <details class="setup-card" data-step="models"><summary><b>2. 音声認識モデル</b><span class="setup-state"></span></summary>
-    <p>ネットがない会場でも字幕を出すための部品です(合計 約2GB)。<b>出発前に必ず</b>ダウンロードしてください。</p>
+    <p>ネットがない会場でも字幕を出すためのモデルです(合計 約2GB)。<b>出発前に必ず</b>ダウンロードしてください。</p>
     <button class="primary-btn" id="btn-models">ダウンロード</button><p class="setup-note" role="status"></p></details>
 
   <details class="setup-card" data-step="llm"><summary><b>3. 日本語訳・要約・チャット</b><span class="setup-state"></span></summary>
     <ol>
-      <li><a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noopener">OpenAI の支払い画面</a>でクレジットを買う(最低5ドル。自動チャージはオフ)</li>
+      <li><a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noopener">OpenAI の支払い画面</a>でクレジットを買う(最低5ドル)。自動チャージはオフにしておく</li>
       <li><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">API キーの画面</a>で「Create new secret key」を押し、表示されたキーをコピー</li>
-      <li>下に貼り付けて「保存して確認」</li>
+      <li>下に貼り付けて「保存して確認」を押す</li>
     </ol>
     <label>API キー <input id="set-llm-key" type="password" autocomplete="off" placeholder="sk-…"></label>
     <details class="setup-more"><summary>ほかのサービスやモデルを使う</summary>
@@ -201,16 +201,16 @@
     <button class="primary-btn" data-save="llm">保存して確認</button><p class="setup-note" role="status"></p></details>
 
   <details class="setup-card" data-step="stt"><summary><b>4. 速い字幕(任意)</b><span class="setup-state"></span></summary>
-    <p>設定すると字幕が速く正確になります(1時間 約$0.30)。なくても PC 内の認識で字幕は出ます。</p>
-    <ol><li><a href="https://www.assemblyai.com/dashboard/api-keys" target="_blank" rel="noopener">AssemblyAI</a> に登録し、支払い方法を登録</li><li>API キーをコピーして貼り付け</li></ol>
+    <p>設定すると字幕が速く正確になります(1時間 約$0.30)。設定しなくても PC 内の認識で字幕は出ます。</p>
+    <ol><li><a href="https://www.assemblyai.com/dashboard/api-keys" target="_blank" rel="noopener">AssemblyAI</a> のアカウントを作り、支払い方法を登録</li><li>API キーをコピーして貼り付け</li></ol>
     <label>API キー <input id="set-stt-key" type="password" autocomplete="off"></label>
     <button class="primary-btn" data-save="stt">保存して確認</button><p class="setup-note" role="status"></p></details>
 
   <details class="setup-card" data-step="ext"><summary><b>5. 予定の取り込み(Chrome 拡張)</b><span class="setup-state"></span></summary>
     <ol>
-      <li><button class="ghost-btn" id="btn-copy-ext">chrome://extensions をコピー</button> して、新しいタブのアドレス欄に貼り付けて開く</li>
-      <li>右上の<b>「デベロッパー モード」</b>をオンにする</li>
-      <li><button class="ghost-btn" id="btn-open-ext">拡張機能のフォルダを開く</button> で出た <b>extension</b> フォルダを、Chrome の画面にドラッグ&ドロップ
+      <li><button class="ghost-btn" id="btn-copy-ext">chrome://extensions をコピー</button> を押し、新しいタブのアドレス欄に貼り付けて開く</li>
+      <li>右上の「デベロッパー モード」をオンにする</li>
+      <li><button class="ghost-btn" id="btn-open-ext">拡張機能のフォルダを開く</button> で出た extension フォルダを、Chrome の画面にドラッグ&ドロップ
         <br><small>うまくいかない時は「パッケージ化されていない拡張機能を読み込む」で次を選ぶ: <code id="ext-path"></code></small> <button class="ghost-btn" id="btn-copy-path">パスをコピー</button></li>
       <li>この画面を再読み込みし、re:Invent のサイトにログインしてから「予定を更新」を押す</li>
     </ol>
