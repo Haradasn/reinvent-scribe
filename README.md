@@ -42,6 +42,8 @@ export LLM_BASE_URL="https://api.openai.com/v1"
 export LLM_API_KEY="sk-..."
 export LLM_MODEL="gpt-4o-mini"
 export SUMMARY_INTERVAL_SEC=180   # 準リアルタイム要約の間隔(任意)
+export ASSEMBLYAI_API_KEY="..."   # 任意: 設定すると字幕が低遅延ストリーミングに
+                                  # ($0.15/時〜。切断時はローカルに自動フォールバック)
 export DATA_DIR=data              # 保存先(任意)
 export WHISPER_MODEL=small.en     # リアルタイム用モデル(任意)
 ```

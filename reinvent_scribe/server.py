@@ -43,11 +43,11 @@ class ChatBody(BaseModel):
 
 
 class Recording:
-    def __init__(self, session, mic, transcriber, wav, summarizer,
+    def __init__(self, session, mic, engine, wav, summarizer,
                  frame_queue, worker):
         self.session = session
         self.mic = mic
-        self.transcriber = transcriber
+        self.engine = engine  # {"transcriber": ..., "streamer": ...}
         self.wav = wav
         self.summarizer = summarizer
         self.frame_queue = frame_queue
@@ -66,8 +66,18 @@ def _check_date(date: str) -> None:
 def create_app(settings: Settings | None = None, mic_factory=MicStream,
                transcriber_factory=Transcriber,
                transcribe_file_fn=transcribe_file, llm: LLMClient | None = None,
-               model_name: str | None = None) -> FastAPI:
+               model_name: str | None = None, streamer_factory="auto") -> FastAPI:
     settings = settings or Settings.from_env()
+    if streamer_factory == "auto":
+        if settings.assemblyai_api_key:
+            from .streaming import AssemblyAIStreamer
+            key = settings.assemblyai_api_key
+
+            def streamer_factory(on_segment, on_partial):
+                return AssemblyAIStreamer(key, on_segment=on_segment,
+                                          on_partial=on_partial)
+        else:
+            streamer_factory = None
     llm = llm or LLMClient(settings)
     model = model_name or settings.whisper_model
     store = SessionStore(settings.data_dir)
@@ -114,13 +124,32 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 if out:
                     broadcast({"type": "summary", "text": out})
 
-            transcriber = transcriber_factory(
-                model_name=model, initial_prompt=glossary_prompt,
-                on_segment=on_segment)
+            engine = {"transcriber": None, "streamer": None}
+
+            def _local_transcriber():
+                if engine["transcriber"] is None:
+                    engine["transcriber"] = transcriber_factory(
+                        model_name=model, initial_prompt=glossary_prompt,
+                        on_segment=on_segment)
+                return engine["transcriber"]
+
+            if streamer_factory is not None:
+                try:
+                    streamer = streamer_factory(
+                        on_segment=on_segment,
+                        on_partial=lambda t: broadcast({"type": "partial", "text": t}))
+                    streamer.start()
+                    engine["streamer"] = streamer
+                    log.info("using streaming STT (AssemblyAI)")
+                except Exception:
+                    log.warning("streaming STT unavailable; using local whisper",
+                                exc_info=True)
+            if engine["streamer"] is None:
+                _local_transcriber()
 
             # The audio callback must stay fast: it only writes the WAV and
-            # enqueues PCM. Whisper inference runs on a dedicated worker
-            # thread so a slow model can never stall capture.
+            # enqueues PCM. Transcription (local inference or network send)
+            # runs on a dedicated worker thread so it can never stall capture.
             frame_queue: queue.Queue = queue.Queue()
 
             def on_frames(frames: np.ndarray) -> None:
@@ -136,7 +165,17 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                     if frames is None:
                         return
                     try:
-                        transcriber.feed(frames.astype(np.float32) / 32768.0)
+                        if engine["streamer"] is not None:
+                            try:
+                                engine["streamer"].feed(frames)
+                                continue
+                            except Exception:
+                                log.warning("stream feed failed; falling back "
+                                            "to local whisper", exc_info=True)
+                                engine["streamer"] = None
+                                broadcast({"type": "stt_fallback"})
+                        _local_transcriber().feed(
+                            frames.astype(np.float32) / 32768.0)
                     except Exception:
                         log.exception("transcription failed; continuing")
 
@@ -155,7 +194,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                     status_code=503)
             worker.start()
             state["mic_ok"] = True
-            state["recording"] = Recording(session, mic, transcriber, wav,
+            state["recording"] = Recording(session, mic, engine, wav,
                                            summarizer, frame_queue, worker)
             date = session.meta["started_at"][:10]
             return {"dirname": session.dir.name, "date": date,
@@ -171,7 +210,12 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         rec.mic.stop()
         rec.frame_queue.put(None)
         rec.worker.join(timeout=30)
-        rec.transcriber.stop()
+        for part in rec.engine.values():
+            if part is not None:
+                try:
+                    part.stop()
+                except Exception:
+                    log.exception("engine stop failed")
         rec.wav.close()
         rec.session.finalize()
         state["hq_pending"].append(rec.session.dir.name)

@@ -10,6 +10,7 @@ class Settings:
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
+    assemblyai_api_key: str | None = None
     summary_interval_sec: int = 180
 
     @classmethod
@@ -20,5 +21,6 @@ class Settings:
             llm_base_url=os.environ.get("LLM_BASE_URL"),
             llm_api_key=os.environ.get("LLM_API_KEY"),
             llm_model=os.environ.get("LLM_MODEL"),
+            assemblyai_api_key=os.environ.get("ASSEMBLYAI_API_KEY"),
             summary_interval_sec=int(os.environ.get("SUMMARY_INTERVAL_SEC", "180")),
         )

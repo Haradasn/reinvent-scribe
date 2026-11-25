@@ -69,7 +69,9 @@ function connectWS() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (msg.type === "segment") addCaption(msg.ts, msg.text);
+    if (msg.type === "segment") { clearPartial(); addCaption(msg.ts, msg.text); }
+    if (msg.type === "partial") showPartial(msg.text);
+    if (msg.type === "stt_fallback") { clearPartial(); addSummaryNote("ストリーミング接続が切れたため、ローカル文字起こしに切り替えました"); }
     if (msg.type === "summary") addSummary(msg.text);
     if (msg.type === "hq_done") loadSessions();
   };
@@ -101,6 +103,30 @@ function addSummary(text) {
   const when = new Date().toTimeString().slice(0, 5);
   card.innerHTML = `<span class="when">${when} 時点</span>${escapeHtml(text)}`;
   box.prepend(card);
+}
+
+function showPartial(text) {
+  const box = $("captions");
+  box.querySelector(".captions-empty")?.remove();
+  let el = box.querySelector(".caption.partial");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "caption partial";
+    box.appendChild(el);
+  }
+  el.textContent = text;
+  box.scrollTop = box.scrollHeight;
+}
+
+function clearPartial() {
+  $("captions").querySelector(".caption.partial")?.remove();
+}
+
+function addSummaryNote(text) {
+  const note = document.createElement("div");
+  note.className = "captions-empty";
+  note.textContent = text;
+  $("captions").appendChild(note);
 }
 
 function escapeHtml(s) {
