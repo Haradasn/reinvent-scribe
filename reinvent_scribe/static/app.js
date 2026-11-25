@@ -7,6 +7,7 @@ const state = {
   timerId: null,
   selected: null, // chat target {dirname, date}
   viewId: 0, // bumped on clear; late replies for an older view are dropped
+  viewing: false, // showing a saved recording
   cleared: false, // ignore late captions after the user cleared the screen
 };
 
@@ -99,7 +100,7 @@ function connectWS() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
-    if (state.cleared && ["segment", "partial", "jp", "summary"].includes(msg.type)) return;
+    if ((state.cleared || state.viewing) && ["segment", "partial", "jp", "summary"].includes(msg.type)) return;
     if (msg.type === "segment") { clearPartial(); addCaption(msg.ts, msg.text); }
     if (msg.type === "partial") showPartial(msg.text);
     if (msg.type === "jp") addJapanese(msg.ts, msg.text);
@@ -130,7 +131,8 @@ function addCaption(ts, text) {
 
 function addJapanese(ts, text) {
   const box = $("captions");
-  const caption = box.querySelector(`.caption[data-ts="${ts}"]`);
+  const caption = [...box.querySelectorAll(`.caption[data-ts="${ts}"]`)]
+    .find((c) => !c.querySelector(".jp-line"));
   const jp = document.createElement("div");
   jp.className = "jp-line";
   jp.textContent = text;
@@ -144,13 +146,14 @@ function addJapanese(ts, text) {
   box.scrollTop = box.scrollHeight;
 }
 
-function addSummary(text) {
+function addSummary(text, label) {
   const box = $("summaries");
-  box.querySelector(".captions-empty")?.remove();
+  // each summary is cumulative, so the newest replaces the previous one
+  box.replaceChildren();
   const card = document.createElement("div");
   card.className = "summary-card";
   const when = new Date().toTimeString().slice(0, 5);
-  card.innerHTML = `<span class="when">${when} 時点</span>${escapeHtml(text)}`;
+  card.innerHTML = `<span class="when">${label || `${when} 時点`}</span>${escapeHtml(text)}`;
   box.prepend(card);
 }
 
@@ -211,13 +214,17 @@ function setPlaceholder(id, text) {
 function clearScreen() {
   state.viewId++;
   setPlaceholder("captions", "録音を開始すると、ここに英語字幕が流れます");
-  setPlaceholder("summaries", "オンライン時、定期的に要約が積まれます");
+  setPlaceholder("summaries", "オンライン時、定期的に要約が更新されます");
   $("chat-log").replaceChildren();
   $("chat-input").value = "";
   $("chat-input").placeholder = "文字起こしについて質問する…";
   $("rec-timer").textContent = "00:00:00";
   state.current = null;
   state.selected = null;
+  state.viewing = false;
+  $("rec-title").textContent = "待機中";
+  $("chat-target").textContent = "";
+  markSelected();
   $("btn-clear").classList.add("hidden");
 }
 
@@ -297,6 +304,9 @@ async function startRecording(id, title, memo) {
   state.timerId = setInterval(tick, 1000);
   setRecorderUI("recording");
   $("rec-title").textContent = `[${id}] ${title}`;
+  $("chat-target").textContent = `[${id}] ${title}`;
+  $("list-date").value = today();
+  loadSessions();
 }
 
 $("btn-stop").addEventListener("click", () => stopRecording());
@@ -316,12 +326,13 @@ async function stopRecording() {
   note.className = "captions-empty";
   note.textContent = "停止しました。高精度文字起こしをバックグラウンドで実行中 — 完了すると一覧に HQ✓ が付きます";
   $("captions").appendChild(note);
+  $("list-date").value = today();
   loadSessions();
 }
 
 /* ---------- sessions ---------- */
 async function loadSessions() {
-  const r = await (await fetch(`/api/sessions?date=${today()}`)).json();
+  const r = await (await fetch(`/api/sessions?date=${$("list-date").value || today()}`)).json();
   const list = $("session-list");
   list.innerHTML = "";
   for (const s of r.sessions) {
@@ -341,15 +352,50 @@ async function loadSessions() {
       const date = s.meta.started_at.slice(0, 10);
       const r = await fetch(`/api/sessions/${date}/${s.dirname}`, { method: "DELETE" });
       if (!r.ok) alert((await r.json().catch(() => ({}))).error || "削除に失敗しました");
+      if (r.ok && !state.recording && state.selected?.dirname === s.dirname) clearScreen();
       loadSessions();
     };
     li.onclick = (e) => {
       if (e.target.closest(".memo-btn")) return;
-      state.selected = { dirname: s.dirname, date: s.meta.started_at.slice(0, 10) };
-      $("chat-input").placeholder = `[${s.meta.id}] について質問する…`;
+      openSession(s.meta.started_at.slice(0, 10), s.dirname);
     };
+    li.dataset.dirname = s.dirname;
     list.appendChild(li);
   }
+  markSelected();
+}
+
+function markSelected() {
+  for (const li of $("session-list").children)
+    li.classList.toggle("selected", li.dataset.dirname === state.selected?.dirname);
+}
+
+// Show a saved recording: chat always; captions/summary only when not recording
+async function openSession(date, dirname) {
+  const view = ++state.viewId;
+  const r = await fetch(`/api/sessions/${date}/${dirname}`);
+  if (!r.ok || view !== state.viewId) return;
+  const d = await r.json();
+  if (view !== state.viewId) return;
+  state.selected = { date, dirname };
+  markSelected();
+  $("chat-target").textContent = `[${d.meta.id}] ${d.meta.title}`;
+  $("chat-input").placeholder = `[${d.meta.id}] について質問する…`;
+  $("chat-log").replaceChildren();
+  for (const m of d.chat) addChat(m.role, m.content);
+  if (state.recording) return;
+  state.viewing = true;
+  $("rec-title").textContent = `[${d.meta.id}] ${d.meta.title}(保存済み)`;
+  if (d.segments.length) $("captions").replaceChildren();
+  else setPlaceholder("captions", "この録音の文字起こしはありません");
+  for (const s of d.segments) {
+    addCaption(s.ts, s.text);
+    if (s.ja) addJapanese(s.ts, s.ja);
+  }
+  if (d.summary) addSummary(d.summary, "保存済みの要約");
+  else setPlaceholder("summaries", "この録音の要約はありません");
+  $("captions").scrollTop = 0;
+  $("btn-clear").classList.remove("hidden");
 }
 
 /* ---------- memo ---------- */
@@ -372,16 +418,54 @@ $("btn-memo-save").addEventListener("click", async () => {
 });
 
 /* ---------- daily report ---------- */
-$("btn-report").addEventListener("click", async () => {
-  $("report-body").textContent = "生成中…";
+const report = { tab: "slack", slack: "", md: "" };
+try { $("f-mention").value = localStorage.getItem("mention") || ""; } catch {}
+
+function showReport(tab = report.tab) {
+  report.tab = tab;
+  $("tab-slack").setAttribute("aria-selected", tab === "slack");
+  $("tab-md").setAttribute("aria-selected", tab === "md");
+  $("report-body").textContent = report[tab];
+  $("btn-copy").disabled = !report[tab];
+}
+$("tab-slack").addEventListener("click", () => showReport("slack"));
+$("tab-md").addEventListener("click", () => showReport("md"));
+
+$("btn-report").addEventListener("click", () => {
+  report.slack = report.md = "";
+  showReport("slack");
+  $("report-body").textContent = "上司のメンションを入力して「生成する」を押してください";
   $("report-modal").showModal();
-  const r = await fetch(`/api/daily-report?date=${today()}`, { method: "POST" });
-  const data = await r.json();
-  $("report-body").textContent = data.markdown || data.error || "失敗しました";
 });
-$("btn-copy").addEventListener("click", () => {
-  navigator.clipboard.writeText($("report-body").textContent);
-  $("btn-copy").textContent = "コピーしました ✓";
+$("btn-regen").addEventListener("click", async () => {
+  const mention = $("f-mention").value.trim();
+  try { localStorage.setItem("mention", mention); } catch {}
+  $("btn-regen").disabled = true;
+  $("btn-copy").disabled = true;
+  $("report-body").textContent = "生成中…";
+  try {
+    const r = await fetch(`/api/daily-report?date=${$("list-date").value || today()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mention }),
+    });
+    if (!r.ok) throw new Error();
+    const data = await r.json();
+    report.slack = data.slack;
+    report.md = data.markdown;
+    showReport();
+  } catch {
+    $("report-body").textContent = "生成に失敗しました";
+  }
+  $("btn-regen").disabled = false;
+});
+$("btn-copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(report[report.tab]);
+    $("btn-copy").textContent = "コピーしました ✓";
+  } catch {
+    $("btn-copy").textContent = "コピーできませんでした";
+  }
   setTimeout(() => ($("btn-copy").textContent = "コピー"), 1500);
 });
 $("btn-report-close").addEventListener("click", () => $("report-modal").close());
@@ -423,6 +507,8 @@ function addChat(cls, text) {
 }
 
 /* ---------- init ---------- */
+$("list-date").value = today();
+$("list-date").addEventListener("change", loadSessions);
 refreshStatus();
 setInterval(refreshStatus, 10000);
 loadSessions();

@@ -13,9 +13,9 @@ _TAIL_CHARS = 6000
 class LLMClient:
     """OpenAI-compatible Chat Completions client. Never raises from chat()."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, timeout: float = 15.0):
         self.settings = settings
-        self._client = httpx.Client(timeout=15.0)
+        self._client = httpx.Client(timeout=timeout)
 
     def available(self) -> bool:
         s = self.settings

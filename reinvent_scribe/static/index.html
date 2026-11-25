@@ -48,36 +48,37 @@
     </div>
   </section>
 
-  <!-- Right: summary + sessions -->
-  <aside class="sidebar">
-    <section class="panel glass">
-      <div class="panel-head">
-        <h2>日本語要約</h2>
-        <span id="summary-badge" class="badge offline">オフライン(字幕のみ)</span>
-      </div>
-      <div id="summaries" class="summaries">
-        <div class="captions-empty">オンライン時、数分ごとに要約が積まれます</div>
-      </div>
-    </section>
+  <!-- Right: summary -->
+  <section class="panel glass summary-panel">
+    <div class="panel-head">
+      <h2>日本語要約</h2>
+      <span id="summary-badge" class="badge offline">オフライン(字幕のみ)</span>
+    </div>
+    <div id="summaries" class="summaries">
+      <div class="captions-empty">オンライン時、定期的に要約が更新されます</div>
+    </div>
+  </section>
 
-    <section class="panel glass">
-      <div class="panel-head">
-        <h2>本日のセッション</h2>
-        <button id="btn-report" class="ghost-btn">日報生成</button>
-      </div>
-      <ul id="session-list" class="session-list"></ul>
-    </section>
-  </aside>
+  <!-- Bottom: chat + recordings -->
+  <section class="panel glass chat-dock">
+    <div class="panel-head">
+      <h2>チャット <span id="chat-target" class="chat-target"></span></h2>
+    </div>
+    <div id="chat-log" class="chat-log"></div>
+    <form id="chat-form" class="chat-form">
+      <input id="chat-input" type="text" placeholder="文字起こしについて質問する…" autocomplete="off">
+      <button type="submit" class="send-btn">送信</button>
+    </form>
+  </section>
+
+  <section class="panel glass">
+    <div class="panel-head">
+      <input id="list-date" class="date-input" type="date" aria-label="表示する日付">
+      <button id="btn-report" class="ghost-btn">日報生成</button>
+    </div>
+    <ul id="session-list" class="session-list"></ul>
+  </section>
 </main>
-
-<!-- Chat dock -->
-<section class="panel glass chat-dock">
-  <div id="chat-log" class="chat-log"></div>
-  <form id="chat-form" class="chat-form">
-    <input id="chat-input" type="text" placeholder="文字起こしについて質問する…" autocomplete="off">
-    <button type="submit" class="send-btn">送信</button>
-  </form>
-</section>
 
 <!-- Start modal -->
 <dialog id="start-modal" class="modal glass">
@@ -99,8 +100,14 @@
 <!-- Report modal -->
 <dialog id="report-modal" class="modal glass wide">
   <h2>出張日報</h2>
+  <label>上司のメンション <input id="f-mention" placeholder="@山田太郎" autocomplete="off"></label>
+  <div class="tabs" role="tablist">
+    <button id="tab-slack" class="ghost-btn" role="tab">Slack投稿文</button>
+    <button id="tab-md" class="ghost-btn" role="tab">日報(Markdown)</button>
+  </div>
   <pre id="report-body" class="report-body"></pre>
   <div class="modal-actions">
+    <button id="btn-regen" class="ghost-btn">生成する</button>
     <button id="btn-copy" class="primary-btn">コピー</button>
     <button id="btn-report-close" class="ghost-btn">閉じる</button>
   </div>

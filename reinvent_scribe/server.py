@@ -18,7 +18,7 @@ from .audio import MicStream, WavWriter
 from .config import Settings
 from .llm import LLMClient, transcript_chat
 from .store import SessionStore
-from .summarize import RollingSummarizer, build_daily_report
+from .summarize import RollingSummarizer, build_daily_report, build_slack_post
 from .transcribe import Transcriber, load_glossary, transcribe_file
 
 log = logging.getLogger(__name__)
@@ -36,6 +36,10 @@ class StartBody(BaseModel):
 
 class MemoBody(BaseModel):
     memo: str
+
+
+class ReportBody(BaseModel):
+    mention: str = ""
 
 
 class ChatBody(BaseModel):
@@ -81,6 +85,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                                           on_partial=on_partial)
         else:
             streamer_factory = None
+    # reports read whole sessions, so they get a longer timeout than captions
+    report_llm = llm or LLMClient(settings, timeout=90.0)
     llm = llm or LLMClient(settings)
     model = model_name or settings.whisper_model
     store = SessionStore(settings.data_dir)
@@ -365,7 +371,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         hq = session.dir / "transcript_hq.md"
         transcript = hq.read_text(encoding="utf-8") if hq.exists() \
             else session.transcript_text()
-        answer = transcript_chat(llm, transcript, history=[], question=body.question)
+        answer = transcript_chat(llm, transcript, history=session.chat_history()[-20:],
+                                 question=body.question)
         if answer is None:
             return JSONResponse({"error": "LLM 呼び出しに失敗しました。"},
                                 status_code=502)
@@ -374,14 +381,23 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         return {"answer": answer}
 
     @app.post("/api/daily-report")
-    def daily_report(date: str):
+    def daily_report(date: str, body: ReportBody | None = None):
         _check_date(date)
         sessions = store.list_for_date(date)
-        md = build_daily_report(sessions, llm)
+        md = build_daily_report(sessions, report_llm)
+        slack = build_slack_post(sessions, report_llm, md,
+                                 body.mention if body else "")
         day_dir = settings.data_dir / date
         day_dir.mkdir(parents=True, exist_ok=True)
         (day_dir / "daily_summary.md").write_text(md, encoding="utf-8")
-        return {"markdown": md}
+        (day_dir / "daily_slack.txt").write_text(slack, encoding="utf-8")
+        return {"markdown": md, "slack": slack}
+
+    @app.get("/api/sessions/{date}/{dirname}")
+    def session_detail(date: str, dirname: str):
+        s = _get_session(date, dirname)
+        return {"meta": s.meta, "segments": s.segments(),
+                "summary": s.summary_text(), "chat": s.chat_history()}
 
     @app.get("/api/status")
     def status():

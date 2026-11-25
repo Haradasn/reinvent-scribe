@@ -77,10 +77,10 @@ body {
 
 /* ---- layout ---- */
 .layout {
-  display: grid; grid-template-columns: 1fr 340px;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px; margin: 0 16px 16px;
 }
-@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
 .panel { padding: 18px; }
 .panel-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -186,12 +186,13 @@ body {
 }
 .badge.offline { color: var(--muted); }
 .badge.online { color: #7ef3c0; border-color: rgba(126,243,192,0.4); }
-.summaries { max-height: 30vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.summary-panel { display: flex; flex-direction: column; min-height: 0; }
+.summaries { flex: 1 1 0; min-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
 .summary-card {
   padding: 12px; border-radius: 12px;
   background: linear-gradient(135deg, rgba(124,108,255,0.12), rgba(56,212,255,0.06));
   border: 1px solid rgba(124,108,255,0.3);
-  font-size: 0.85rem; line-height: 1.7; white-space: pre-wrap;
+  font-size: 0.98rem; line-height: 1.8; white-space: pre-wrap;
   animation: slide-in 0.4s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .summary-card .when { color: var(--muted); font-size: 0.7rem; display: block; margin-bottom: 4px; }
@@ -213,7 +214,14 @@ body {
 .session-list button.memo-btn:hover { color: var(--text); }
 
 /* ---- chat ---- */
-.chat-dock { margin: 0 16px 16px; padding: 14px 18px; }
+.chat-dock { display: flex; flex-direction: column; }
+.chat-dock .chat-form { margin-top: auto; }
+.chat-target { color: var(--accent2); }
+.date-input { background: none; border: 1px solid var(--border); border-radius: 10px; color: var(--text); color-scheme: dark; padding: 6px 10px; font: inherit; }
+.session-list li { cursor: pointer; }
+.session-list li.selected { border-color: var(--accent); background: rgba(124,108,255,0.18); }
+.tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+.tabs [aria-selected="true"] { color: var(--text); border-color: var(--accent); }
 .chat-log { display: flex; flex-direction: column; gap: 8px; max-height: 22vh; overflow-y: auto; margin-bottom: 10px; }
 .chat-msg {
   max-width: 72%; padding: 9px 13px; border-radius: 14px;
@@ -261,7 +269,7 @@ body {
 /* ---- modals ---- */
 .modal {
   border: 1px solid var(--border); color: var(--text);
-  padding: 24px; width: min(440px, 92vw);
+  padding: 24px; width: min(440px, 92vw); margin: auto;
   background: rgba(20, 26, 51, 0.92);
 }
 .modal.wide { width: min(680px, 94vw); }

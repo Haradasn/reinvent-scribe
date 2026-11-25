@@ -1,10 +1,22 @@
 import logging
+import re
 import threading
 import time
 
 from .store import Session
 
 log = logging.getLogger(__name__)
+
+RETRY_WAITS = (2, 6)  # seconds; reports can wait out a temporary 503
+
+
+def _chat_with_retry(llm, prompt: str) -> str | None:
+    for wait in (0, *RETRY_WAITS):
+        time.sleep(wait)
+        out = llm.chat([{"role": "user", "content": prompt}])
+        if out:
+            return out
+    return None
 
 
 class RollingSummarizer:
@@ -86,13 +98,50 @@ def build_daily_report(sessions: list[Session], llm) -> str:
             prompt = (
                 "以下は技術カンファレンスのセッションの英語文字起こしです。"
                 "上司への出張日報に載せる日本語の要点を2〜4行で書いてください。"
-                "ブログ記事のように、何が発表され何が重要かが読んでわかる文体で。\n\n"
-                + s.transcript_text()[:12000]
+                "ブログ記事のように、何が発表され何が重要かが読んでわかる文体で。"
+                "文字起こしにない内容を推測で補わず、内容が乏しい場合は"
+                "「内容を確認できませんでした」とだけ書くこと。\n\n"
+                + s.best_transcript()[:200000]
             )
-            summary = llm.chat([{"role": "user", "content": prompt}])
-        parts.append(summary or "(要約なし: オフラインのためメモのみ)")
+            summary = _chat_with_retry(llm, prompt)
+        parts.append(summary or "(要約を生成できませんでした)")
 
     memos = [f"- [{s.meta['id']}] {s.meta['memo']}" for s in sessions if s.meta.get("memo")]
     if memos:
         parts += ["", "## 所感・特筆事項", *memos]
     return "\n".join(parts)
+
+
+def _to_slack_text(text: str) -> str:
+    """Plain text that survives pasting into Slack's editor."""
+    text = re.sub(r"^#+\s*", "", text, flags=re.M)
+    text = re.sub(r"^(\s*)[-*]\s+", r"\1・", text, flags=re.M)
+    return text.replace("**", "").strip()
+
+
+def build_slack_post(sessions: list[Session], llm, report_md: str,
+                     mention: str) -> str:
+    """Short post to the manager; copy-pasted into Slack by the user."""
+    head = [mention.strip()] if mention.strip() else []
+    if not sessions:
+        return "\n".join(head + ["本日の出席セッションはありません。"])
+    date = sessions[0].meta["started_at"][:10]
+    head.append(f"お疲れ様です。re:Invent 出張日報({date})です。")
+    body = None
+    if llm.available():
+        body = _chat_with_retry(llm,
+            "以下の出張日報をもとに、上司へSlackで報告する投稿の本文を日本語で書いてください。"
+            "です・ます調、全体で400字程度。【参加セッション】【主なポイント】【所感】の順。"
+            "所感は日報の「所感・特筆事項」に書かれた内容だけを使い、なければ【所感】ごと省略。"
+            "日報にない事実や感想を足さない。宛名・挨拶・表・マークダウン記号は不要で、"
+            "箇条書きは「・」を使うこと。本文のみを返す。"
+            "要約を生成できなかったセッションは【主なポイント】に含めない。\n\n" + report_md)
+    if not body:
+        lines = ["【参加セッション】"]
+        lines += [f"・{s.meta['started_at'][11:16]} [{s.meta['id']}] {s.meta['title']}"
+                  for s in sessions]
+        memos = [f"・[{s.meta['id']}] {s.meta['memo']}" for s in sessions if s.meta.get("memo")]
+        if memos:
+            lines += ["", "【所感】", *memos]
+        body = "\n".join(lines)
+    return "\n".join(head) + "\n\n" + _to_slack_text(body)

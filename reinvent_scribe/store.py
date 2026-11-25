@@ -60,6 +60,43 @@ class Session:
         path = self.dir / "transcript.md"
         return path.read_text(encoding="utf-8") if path.exists() else ""
 
+    def segments(self) -> list[dict]:
+        """Realtime captions with their translation, for display."""
+        out: list[dict] = []
+        for line in self.transcript_text().splitlines():
+            m = re.match(r"\[(\d+):(\d\d):(\d\d)\] (.*)", line)
+            if m:
+                ts = int(m[1]) * 3600 + int(m[2]) * 60 + int(m[3])
+                if m[4].startswith("(JA) "):
+                    # translations arrive in order: first untranslated match
+                    hit = next((s for s in out if s["ts"] == ts and not s["ja"]), None)
+                    if hit:
+                        hit["ja"] = m[4][5:]
+                else:
+                    out.append({"ts": ts, "text": m[4], "ja": ""})
+            elif out and line.strip():  # continuation of a multi-line translation
+                target = next((s for s in reversed(out) if s["ja"]), None)
+                if target:
+                    target["ja"] += "\n" + line
+        return out
+
+    def best_transcript(self) -> str:
+        hq = self.dir / "transcript_hq.md"
+        return hq.read_text(encoding="utf-8") if hq.exists() else self.transcript_text()
+
+    def summary_text(self) -> str:
+        path = self.dir / "summary.md"
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def chat_history(self) -> list[dict]:
+        path = self.dir / "chat.md"
+        if not path.exists():
+            return []
+        parts = re.split(r"^\*\*(user|assistant)\*\*: ",
+                         path.read_text(encoding="utf-8"), flags=re.M)
+        return [{"role": r, "content": t.strip()}
+                for r, t in zip(parts[1::2], parts[2::2])]
+
     def append_chat(self, role: str, text: str) -> None:
         with open(self.dir / "chat.md", "a", encoding="utf-8") as f:
             f.write(f"**{role}**: {text}\n\n")
