@@ -265,6 +265,8 @@ def test_summary_saved_on_stop(tmp_path):
             if (tmp_path / date / dirname).exists():
                 break
         c.post("/api/sessions/stop")
+        while c.get("/api/status").json()["hq_pending"]:
+            time.sleep(0.02)
     summary = tmp_path / date / dirname / "summary.md"
     # summary.md exists iff a summary was produced; with interval 0 it ran
     assert summary.exists()

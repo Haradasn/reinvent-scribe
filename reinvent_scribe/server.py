@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 SCHEDULE_CSV = Path("sessions.csv")
 GLOSSARY = Path("glossary.txt")
+END_UTTERANCE = object()  # queue marker: finalize captions on pause
 
 
 class StartBody(BaseModel):
@@ -158,7 +159,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                         return
                     ts, text = item
                     out = llm.chat([{"role": "user", "content":
-                                     "次の英語を自然な日本語に翻訳してください。"
+                                     "次の発言を自然な日本語に翻訳してください。"
+                                     "すでに日本語ならそのまま返すこと。"
                                      "訳文のみを返すこと。\n\n" + text}],
                                    max_tokens=300)
                     if out:
@@ -188,7 +190,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                             out, encoding="utf-8")
                     except Exception:
                         log.exception("summary save failed")
-                    broadcast({"type": "summary", "text": out})
+                    broadcast({"type": "summary", "text": out,
+                               "dirname": session.dir.name})
 
             engine = {"transcriber": None, "streamer": None}
 
@@ -230,6 +233,15 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                     frames = frame_queue.get()
                     if frames is None:
                         return
+                    if frames is END_UTTERANCE:
+                        try:
+                            if engine["streamer"] is not None:
+                                engine["streamer"].end_utterance()
+                            elif engine["transcriber"] is not None:
+                                engine["transcriber"].flush()
+                        except Exception:
+                            log.warning("could not finalize utterance", exc_info=True)
+                        continue
                     try:
                         if engine["streamer"] is not None:
                             try:
@@ -299,20 +311,21 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             rec.jp_queue.put(None)
             rec.jp_worker.join(timeout=20)
         _step("wav", rec.wav.close)
-        # flush any un-summarized tail, then persist the rolling summary
-        try:
-            tail = rec.summarizer.summarize()
-            if tail:
-                broadcast({"type": "summary", "text": tail})
-            if rec.summarizer.current:
-                (rec.session.dir / "summary.md").write_text(
-                    rec.summarizer.current, encoding="utf-8")
-        except Exception:
-            log.exception("summary persistence failed")
         rec.session.finalize()
         state["hq_pending"].append(rec.session.dir.name)
 
         def _hq():
+            # summarizing waits on the network, so it must not delay stop
+            try:
+                tail = rec.summarizer.summarize()
+                if tail:
+                    broadcast({"type": "summary", "text": tail,
+                               "dirname": rec.session.dir.name})
+                if rec.summarizer.current:
+                    (rec.session.dir / "summary.md").write_text(
+                        rec.summarizer.current, encoding="utf-8")
+            except Exception:
+                log.exception("summary persistence failed")
             try:
                 segs = transcribe_file_fn(rec.session.dir / "audio.wav",
                                           initial_prompt=glossary_prompt)
@@ -347,6 +360,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                                 status_code=409)
         rec.mic.stop()
         rec.paused = True
+        rec.frame_queue.put(END_UTTERANCE)
         return {"ok": True}
 
     @app.post("/api/sessions/resume")

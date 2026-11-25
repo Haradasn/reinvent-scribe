@@ -27,6 +27,7 @@ class AssemblyAIStreamer:
         self._ws = None
         self._receiver: threading.Thread | None = None
         self._buf = bytearray()
+        self._terminated = threading.Event()
 
     # AAI v3 rejects audio chunks shorter than 50ms; batch to >=80ms
     _MIN_SEND_BYTES = int(16000 * 0.08) * 2
@@ -45,9 +46,11 @@ class AssemblyAIStreamer:
             for message in self._ws:
                 if isinstance(message, str):
                     self._handle(message)
-            log.warning("AssemblyAI connection closed by server")
+            log.info("AssemblyAI connection closed")
         except Exception as e:
             log.warning("AssemblyAI receiver closed: %r", e)
+        finally:
+            self._terminated.set()
 
     def _handle(self, message: str) -> None:
         try:
@@ -55,8 +58,10 @@ class AssemblyAIStreamer:
         except ValueError:
             return
         if msg.get("type") != "Turn":
-            if msg.get("type") not in ("Begin", "Termination"):
+            if msg.get("type") not in ("Begin", "SpeechStarted", "Termination"):
                 log.warning("AssemblyAI message: %s", message[:300])
+            if msg.get("type") == "Termination":
+                self._terminated.set()
             return
         transcript = (msg.get("transcript") or "").strip()
         if not transcript:
@@ -74,12 +79,31 @@ class AssemblyAIStreamer:
             data, self._buf = bytes(self._buf), bytearray()
             self._ws.send(data)
 
+    def _flush_audio(self) -> None:
+        if self._buf:  # pad to the 50ms minimum the service accepts
+            data = bytes(self._buf).ljust(1600, b"\0")
+            self._buf = bytearray()
+            self._ws.send(data)
+
+    def end_utterance(self) -> None:
+        """Finalize what was said so far (used when pausing)."""
+        self._flush_audio()
+        self._ws.send(json.dumps({"type": "ForceEndpoint"}))
+
     def stop(self) -> None:
         try:
             if self._ws is not None:
+                self._flush_audio()
                 self._ws.send(json.dumps({"type": "Terminate"}))
-                self._ws.close()
+                # closing right away would drop the last utterance
+                self._terminated.wait(timeout=4)
         except Exception:
-            pass
+            log.info("streamer already disconnected")
+        finally:
+            if self._ws is not None:
+                try:
+                    self._ws.close()
+                except Exception:
+                    pass
         if self._receiver is not None:
             self._receiver.join(timeout=3)

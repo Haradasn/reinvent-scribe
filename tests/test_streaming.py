@@ -132,3 +132,102 @@ def test_feed_buffers_small_chunks():
     s.feed(small)  # 90ms total -> flushed
     assert len(s._ws.sent) == 1
     assert len(s._ws.sent[0]) == 480 * 3 * 2  # bytes of int16
+
+
+# --- the last utterance must survive stop and pause ---
+
+class LateWS:
+    """Delivers the final turn only after Terminate, like the real service."""
+    def __init__(self):
+        import queue
+        self.q, self.sent, self.closed = queue.Queue(), [], False
+
+    def send(self, data):
+        self.sent.append(data)
+        if isinstance(data, str) and "Terminate" in data:
+            def later():
+                import time
+                time.sleep(0.2)
+                if not self.closed:
+                    self.q.put(json.dumps({"type": "Turn", "transcript": "last words",
+                                           "end_of_turn": True, "words": []}))
+                    self.q.put(json.dumps({"type": "Termination"}))
+            threading.Thread(target=later).start()
+
+    def close(self):
+        self.closed = True
+        self.q.put(None)
+
+    def __iter__(self):
+        return iter(self.q.get, None)
+
+
+def late_streamer(got):
+    s = AssemblyAIStreamer(api_key="k", on_segment=lambda ts, t: got.append(t))
+    s._ws = LateWS()
+    s._receiver = threading.Thread(target=s._recv_loop, daemon=True)
+    s._receiver.start()
+    return s
+
+
+def test_stop_waits_for_final_turn_and_sends_buffered_audio():
+    got = []
+    s = late_streamer(got)
+    s.feed(np.zeros(800, dtype=np.int16))  # 50ms, still buffered
+    s.stop()
+    assert got == ["last words"]
+    assert len(s._ws.sent[0]) == 1600
+
+
+def test_end_utterance_forces_endpoint():
+    s = late_streamer([])
+    s.end_utterance()
+    assert json.loads(s._ws.sent[-1]) == {"type": "ForceEndpoint"}
+    s.stop()
+
+
+def test_pause_finalizes_current_utterance(tmp_path):
+    class S(FakeStreamer):
+        ended = 0
+
+        def end_utterance(self):
+            S.ended += 1
+
+    with make_client(tmp_path, S) as c:
+        c.post("/api/sessions", json={"session_id": "P", "title": "t"})
+        assert c.post("/api/sessions/pause").status_code == 200
+        import time
+        for _ in range(50):
+            if S.ended:
+                break
+            time.sleep(0.02)
+        c.post("/api/sessions/stop")
+    assert S.ended == 1
+
+
+def test_stop_does_not_wait_for_slow_summary(tmp_path):
+    import time
+
+    class SlowLLM:
+        def available(self):
+            return True
+
+        def chat(self, messages, max_tokens=1000):
+            if "これまでの要約" in str(messages):
+                time.sleep(1.5)
+            return "x"
+
+    app = create_app(settings=Settings(data_dir=tmp_path), mic_factory=FakeMic,
+                     transcriber_factory=FakeTranscriber,
+                     transcribe_file_fn=fake_transcribe_file, llm=SlowLLM(),
+                     model_name="x", streamer_factory=None)
+    with TestClient(app) as c:
+        c.post("/api/sessions", json={"session_id": "Q", "title": "t"})
+        t = time.time()
+        c.post("/api/sessions/stop")
+        assert time.time() - t < 1.0
+        for _ in range(100):
+            if not c.get("/api/status").json()["hq_pending"]:
+                break
+            time.sleep(0.05)
+    assert list(tmp_path.glob("*/*/summary.md"))

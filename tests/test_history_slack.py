@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -31,6 +33,8 @@ def make(tmp_path, llm):
 def record(c, sid):
     r = c.post("/api/sessions", json={"session_id": sid, "title": "T"}).json()
     c.post("/api/sessions/stop")
+    while c.get("/api/status").json()["hq_pending"]:
+        time.sleep(0.02)
     return f"/api/sessions/{r['date']}/{r['dirname']}"
 
 

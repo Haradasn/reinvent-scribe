@@ -107,7 +107,7 @@ function connectWS() {
     if (msg.type === "partial") showPartial(msg.text);
     if (msg.type === "jp") addJapanese(msg.ts, msg.text);
     if (msg.type === "stt_fallback") { clearPartial(); addSummaryNote("ストリーミング接続が切れたため、ローカル文字起こしに切り替えました"); }
-    if (msg.type === "summary") addSummary(msg.text);
+    if (msg.type === "summary" && (!msg.dirname || msg.dirname === state.current?.dirname)) addSummary(msg.text);
     if (msg.type === "hq_done") loadSessions();
   };
   ws.onclose = () => setTimeout(connectWS, 2000);
@@ -322,7 +322,20 @@ async function doStart(payload) {
   loadSessions();
 }
 
-$("btn-stop").addEventListener("click", () => stopRecording());
+$("btn-stop").addEventListener("click", async () => {
+  if (state.busy) return;
+  setBusy(true);
+  $("btn-stop").disabled = true;
+  $("rec-title").textContent = "停止中…";
+  try {
+    await stopRecording();
+  } catch {
+    alert("停止できたか確認できません。画面を再読み込みしてください");
+  } finally {
+    $("btn-stop").disabled = false;
+    setBusy(false);
+  }
+});
 
 async function stopRecording() {
   const r = await fetch("/api/sessions/stop", { method: "POST" });
