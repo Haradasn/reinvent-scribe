@@ -93,3 +93,17 @@ def test_bundled_glossary_fits_assemblyai():
     path = Path(__file__).parent.parent / "glossary.txt"
     assert load_keyterms(path) == _glossary_terms(path)  # nothing dropped
     assert load_glossary(path)[1] is False
+
+
+def test_old_space_separated_line_is_split_for_assemblyai(tmp_path):
+    from reinvent_scribe.transcribe import load_keyterms
+    path = tmp_path / "glossary.txt"
+    path.write_text("AWS Amazon EC2 S3 Lambda DynamoDB Aurora RDS Redshift SageMaker\nKiro\n")
+    assert load_keyterms(path)[:3] == ["AWS", "Amazon", "EC2"]
+    assert load_keyterms(path)[-1] == "Kiro"
+
+
+def test_long_first_term_does_not_empty_whisper_prompt(tmp_path):
+    path = tmp_path / "glossary.txt"
+    path.write_text(" ".join(["w"] * 200) + "\nKiro\nKarpenter\n")
+    assert load_glossary(path) == ("Kiro, Karpenter", True)

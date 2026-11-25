@@ -97,11 +97,12 @@ def test_llm(llm) -> str | None:
             }.get(llm.last_error, "接続できませんでした。キーとモデル名を確認してください。")
 
 
-def test_stt(key: str | None) -> str | None:
+def test_stt(key: str | None, model: str | None = None) -> str | None:
     if not key:
         return "APIキーを入力してください。"
     from .streaming import AssemblyAIStreamer
-    s = AssemblyAIStreamer(key, on_segment=lambda ts, t: None)
+    s = AssemblyAIStreamer(key, on_segment=lambda ts, t: None,
+                           **({"speech_model": model} if model else {}))
     try:
         s.start()
         # a bad key is accepted at first and then closed by the service

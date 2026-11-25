@@ -160,3 +160,25 @@ def test_status_reports_mic_failure(tmp_path):
         status = c.get("/api/status").json()
         assert status["recording"] is False
         assert status["llm_ok"] is False
+
+
+def test_glossary_edit_applies_to_next_recording(tmp_path, monkeypatch):
+    import reinvent_scribe.server as srv
+    gl = tmp_path / "g.txt"
+    gl.write_text("Kiro\n")
+    monkeypatch.setattr(srv, "GLOSSARY", gl)
+    prompts = []
+
+    class T(FakeTranscriber):
+        def __init__(self, model_name, initial_prompt, on_segment, model=None):
+            prompts.append(initial_prompt)
+            super().__init__(model_name, initial_prompt, on_segment, model)
+
+    app = create_app(settings=Settings(data_dir=tmp_path / "d"), mic_factory=FakeMic,
+                     transcriber_factory=T, transcribe_file_fn=fake_transcribe_file,
+                     llm=FakeLLM(), model_name="x", streamer_factory=None)
+    with TestClient(app) as c:
+        _start(c, "A"); c.post("/api/sessions/stop")
+        gl.write_text("Karpenter\n")
+        _start(c, "B"); c.post("/api/sessions/stop")
+    assert prompts[0] == "Kiro" and prompts[-1] == "Karpenter"

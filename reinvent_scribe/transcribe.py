@@ -32,7 +32,8 @@ def load_glossary(path: Path) -> tuple[str, bool]:
         words += len(t.split())
         if words > _MAX_PROMPT_WORDS:
             truncated = True
-            break
+            words -= len(t.split())
+            continue  # a shorter term later may still fit
         kept.append(t)
     if truncated:
         log.warning("glossary.txt exceeds ~224 tokens; using the first %d terms",
@@ -46,7 +47,15 @@ _MAX_KEYTERMS, _MAX_KEYTERM_CHARS = 100, 50
 
 
 def load_keyterms(path: Path) -> list[str]:
-    terms = [t for t in _glossary_terms(path) if len(t) <= _MAX_KEYTERM_CHARS]
+    terms = []
+    for t in _glossary_terms(path):
+        if len(t) <= _MAX_KEYTERM_CHARS:
+            terms.append(t)
+        else:  # likely the old format: many terms on one line
+            log.warning("glossary.txt line over %d characters; sending its words "
+                        "one by one: %s", _MAX_KEYTERM_CHARS, t[:60])
+            terms += [w for w in t.split()
+                      if w not in terms and len(w) <= _MAX_KEYTERM_CHARS]
     if len(terms) > _MAX_KEYTERMS:
         log.warning("glossary.txt has %d terms; AssemblyAI gets the first %d",
                     len(terms), _MAX_KEYTERMS)

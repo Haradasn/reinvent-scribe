@@ -152,7 +152,10 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
     model = model_name or settings.whisper_model
     store = SessionStore(settings.data_dir)
     photos = PhotoStore(settings.data_dir, settings.event_tz)
-    glossary_prompt, _ = load_glossary(GLOSSARY)
+
+    def glossary_prompt() -> str:
+        # read on every use so edits apply from the next recording
+        return load_glossary(GLOSSARY)[0]
 
     from contextlib import asynccontextmanager
 
@@ -300,7 +303,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             def _local_transcriber():
                 if engine["transcriber"] is None:
                     engine["transcriber"] = transcriber_factory(
-                        model_name=model, initial_prompt=glossary_prompt,
+                        model_name=model, initial_prompt=glossary_prompt(),
                         on_segment=lambda ts, t: on_segment(ts + pos["local_from"], t))
                 return engine["transcriber"]
 
@@ -530,7 +533,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 log.exception("summary persistence failed")
             try:
                 segs = transcribe_file_fn(rec.session.dir / "audio.wav",
-                                          initial_prompt=glossary_prompt)
+                                          initial_prompt=glossary_prompt())
                 meta = rec.session.meta
                 lines = [f"# [{meta['id']}] {meta['title']} (high quality)", ""]
                 from .store import _fmt_ts
@@ -970,7 +973,8 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 return JSONResponse({"error": "録音中は確認できません"}, status_code=409)
             return setup.test_mic()
         check = {"llm": lambda: setup.test_llm(llm),
-                 "stt": lambda: setup.test_stt(settings.assemblyai_api_key),
+                 "stt": lambda: setup.test_stt(settings.assemblyai_api_key,
+                                                 settings.assemblyai_model),
                  "gmail": lambda: setup.test_gmail(settings.gmail_address,
                                                    settings.gmail_app_password)}.get(what)
         if check is None:
