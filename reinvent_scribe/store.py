@@ -167,6 +167,35 @@ class SessionStore:
                 continue  # e.g. being deleted or half-written
         return sorted(out, key=lambda s: s.meta["started_at"])
 
+    @staticmethod
+    def _free(path: Path) -> Path:
+        out, n = path, 2
+        while out.exists():
+            out, n = path.with_name(f"{path.name}-{n}"), n + 1
+        return out
+
+    def trash(self, session: Session) -> Path:
+        """Move aside; nothing is lost until it is deleted from the trash."""
+        dst = self._free(self.data_dir / "_trash" / session.dir.parent.name / session.dir.name)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        session.dir.rename(dst)
+        return dst
+
+    def restore(self, session: Session) -> Path:
+        dst = self._free(self.data_dir / session.dir.parent.name / session.dir.name)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        session.dir.rename(dst)
+        return dst
+
+    def trashed(self) -> list[Session]:
+        out = []
+        for path in self.data_dir.glob("_trash/*/*/meta.json"):
+            try:
+                out.append(Session.load(path.parent))
+            except (ValueError, OSError):
+                continue
+        return sorted(out, key=lambda s: s.meta["started_at"], reverse=True)
+
     def list_for_date(self, date: str) -> list[Session]:
         """Recordings of that event day (linked schedule date wins)."""
         return [s for s in self.all()

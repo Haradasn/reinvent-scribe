@@ -86,16 +86,23 @@
     </form>
   </section>
 
-  <section class="panel glass">
-    <div class="panel-head">
-      <input id="list-date" class="date-input" type="date" aria-label="表示する日付">
-      <span id="sync-note" class="sync-note" role="status"></span>
-      <button id="btn-sync" class="ghost-btn" title="re:Invent のカレンダーから予定を読み込む">⟳ 予定を更新</button>
-      <button id="btn-photos" class="ghost-btn">📷 写真を取り込む</button>
-      <button id="btn-report" class="ghost-btn">日報生成</button>
+  <section class="panel glass cal-panel">
+    <div class="cal-head">
+      <h2>スケジュールと録音</h2>
+      <button id="btn-photos" class="ghost-btn">写真を取り込む</button>
+      <button id="btn-report" class="ghost-btn">日報</button>
+      <button id="btn-week" class="ghost-btn">週で見る</button>
     </div>
-    <div id="day-chips" class="day-chips"></div>
-    <ul id="session-list" class="session-list"></ul>
+    <input id="list-date" type="hidden">
+    <div id="day-chips" class="day-chips" role="tablist" aria-label="表示する日"></div>
+    <div id="cal-day" class="cal-scroll"></div>
+    <div id="other-recs" class="other-recs"></div>
+    <div class="cal-foot">
+      <button id="btn-unscheduled" class="ghost-btn">＋ 予定外の録音</button>
+      <span id="sync-note" class="sync-note" role="status"></span>
+      <button id="btn-sync" class="link-btn" title="re:Invent のカレンダーから予定を読み込む">予定を更新</button>
+      <button id="btn-trash" class="link-btn">ゴミ箱</button>
+    </div>
   </section>
 </main>
 
@@ -149,6 +156,29 @@
       </div>
     </details>
   </section>
+</dialog>
+
+<!-- One session: details and its recordings -->
+<dialog id="plan-modal" class="modal glass wide" aria-labelledby="plan-title">
+  <div class="modal-head"><h2 id="plan-title"></h2>
+    <button class="icon-btn" data-close aria-label="閉じる" title="閉じる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <p id="plan-info" class="plan-info"></p>
+  <div id="plan-recs" class="other-recs"></div>
+  <div class="modal-actions"><span id="plan-note" class="plan-note"></span><button id="plan-go" class="primary-btn"></button></div>
+</dialog>
+
+<!-- Whole week -->
+<dialog id="week-modal" class="modal glass week-modal" aria-label="週のスケジュール">
+  <div class="modal-head"><h2>週のスケジュール</h2>
+    <button class="icon-btn" data-close aria-label="閉じる" title="閉じる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div id="cal-week" class="cal-scroll"></div>
+</dialog>
+
+<!-- Trash -->
+<dialog id="trash-modal" class="modal glass wide">
+  <div class="modal-head"><h2>ゴミ箱</h2>
+    <button class="icon-btn" data-close aria-label="閉じる" title="閉じる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div id="trash-list" class="other-recs"></div>
 </dialog>
 
 <!-- Photo import -->

@@ -504,7 +504,7 @@ async function startRecording(payload) {
 function setBusy(on) {
   state.busy = on;
   renderHero();
-  for (const b of document.querySelectorAll(".row-rec")) b.disabled = on || state.recording;
+  renderDay();
 }
 
 async function doStart(payload) {
@@ -577,91 +577,293 @@ async function stopRecording() {
 
 /* ---------- sessions ---------- */
 let listSeq = 0;
+const cal = { recs: [], days: {}, scrolled: null };
+
 async function loadSessions() {
   const date = $("list-date").value || today();
   const seq = ++listSeq;
-  const r = await (await fetch(`/api/sessions?date=${date}`)).json();
+  let r, d;
+  try {
+    [r, d] = await Promise.all([
+      fetch(`/api/sessions?date=${date}`).then((x) => x.json()),
+      fetch("/api/recording-days").then((x) => x.json()),
+    ]);
+  } catch { return; }
   if (seq !== listSeq) return; // a newer request superseded this one
-  const list = $("session-list");
-  list.replaceChildren();
+  cal.recs = r.sessions;
+  cal.days = d.days;
+  renderChips();
+  renderDay();
+}
+
+const recsOf = (key) => cal.recs.filter((s) => s.meta.schedule_key === key);
+
+function renderDay() {
+  // a row menu the user has open must not vanish under them
+  if (document.querySelector(".cal-panel .row-menu[open]")) return;
+  const date = $("list-date").value || today();
   const plans = sched.items.filter((i) => i.date === date);
-  const rest = new Set(r.sessions);
-  for (const p of plans) {
-    list.appendChild(planRow(p));
-    for (const s of r.sessions) {
-      if (s.meta.schedule_key === p.key) {
-        rest.delete(s);
-        list.appendChild(recordingRow(s));
-      }
-    }
+  drawGrid($("cal-day"), [date], 1.5);
+  if (cal.scrolled !== date && plans.length) {
+    cal.scrolled = date;
+    const now = $("cal-day").querySelector(".cal-now");
+    const first = now || $("cal-day").querySelector(".cal-event");
+    if (first) $("cal-day").scrollTop = Math.max(0, first.offsetTop - 40);
   }
-  for (const s of rest) list.appendChild(recordingRow(s));
-  const add = document.createElement("button");
-  add.className = "ghost-btn row-rec-other";
-  add.textContent = "＋ 予定外の録音";
-  add.disabled = state.recording;
-  add.onclick = openUnscheduled;
-  const li = document.createElement("li");
-  li.className = "plan";
-  li.appendChild(add);
-  list.appendChild(li);
+  const keys = new Set(plans.map((p) => p.key));
+  const rest = cal.recs.filter((s) => !keys.has(s.meta.schedule_key));
+  const box = $("other-recs");
+  box.replaceChildren();
+  if (rest.length) {
+    const h = document.createElement("h3");
+    h.textContent = `${plans.length ? "予定以外の録音" : "録音"} ${rest.length}件`;
+    box.append(h, ...rest.map(recordingRow));
+  }
   markSelected();
 }
 
-function planRow(p) {
-  const li = document.createElement("li");
-  li.className = "plan";
-  li.innerHTML =
-    `<span class="row-time">${escapeHtml(p.start)}–${escapeHtml(p.end)}</span>` +
-    `<span class="row-main">${escapeHtml(p.title)}<br><span class="row-venue">${escapeHtml(p.venue)}</span></span>` +
-    (KIND[p.kind] ? `<span class="tag">${KIND[p.kind]}</span>` : "") +
-    `<button class="row-rec">${p.date === sched.today ? "● 録音" : "● テスト"}</button>`;
-  const b = li.querySelector(".row-rec");
-  b.disabled = state.recording || !!state.busy;
-  b.onclick = () => startItem(p);
-  return li;
+const toMin = (hm) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3));
+
+// Clashing sessions sit side by side, like any calendar
+function lanes(items) {
+  const out = [];
+  let group = [], end = -1;
+  const flush = () => {
+    const cols = [];
+    for (const g of group) {
+      let c = cols.findIndex((e) => e <= g.from);
+      if (c < 0) c = cols.push(0) - 1;
+      cols[c] = g.to;
+      g.col = c;
+    }
+    for (const g of group) g.cols = cols.length;
+    out.push(...group);
+    group = [];
+  };
+  for (const i of [...items].sort((x, y) => x.start.localeCompare(y.start))) {
+    const from = toMin(i.start), to = Math.max(toMin(i.end), from + 30);
+    if (from >= end) flush();
+    group.push({ i, from, to });
+    end = Math.max(end, to);
+  }
+  flush();
+  return out;
 }
+
+function drawGrid(box, days, scale) {
+  const items = sched.items.filter((i) => days.includes(i.date));
+  const keep = box.scrollTop;
+  box.replaceChildren();
+  if (!items.length) {
+    const p = document.createElement("div");
+    p.className = "captions-empty";
+    p.textContent = "この日の予定はありません";
+    box.appendChild(p);
+    return;
+  }
+  let lo = Math.floor(Math.min(...items.map((i) => toMin(i.start))) / 60) * 60;
+  if (days.includes(sched.today)) { // show "now" when the day is about to begin
+    const at = (nowMs() - evMs(sched.today, "00:00")) / 60000;
+    if (at < lo && at > lo - 120) lo = Math.floor(at / 60) * 60;
+  }
+  const hi = Math.ceil(Math.max(...items.map((i) => Math.max(toMin(i.end), toMin(i.start) + 30))) / 60) * 60;
+  const grid = document.createElement("div");
+  grid.className = "cal-grid";
+  grid.style.gridTemplateColumns = `44px repeat(${days.length}, minmax(0, 1fr))`;
+  const rail = document.createElement("div");
+  rail.className = "cal-rail";
+  const height = (hi - lo) * scale;
+  for (let m = lo; m < hi; m += 60) {
+    const l = document.createElement("span");
+    l.style.top = `${(m - lo) * scale}px`;
+    l.textContent = `${Math.floor(m / 60)}:00`;
+    rail.appendChild(l);
+  }
+  if (days.length > 1) {
+    grid.appendChild(document.createElement("div"));
+    for (const d of days) {
+      const h = document.createElement("div");
+      h.className = `cal-dayname${d === sched.today ? " today" : ""}`;
+      h.textContent = dayLabel(d);
+      grid.appendChild(h);
+    }
+  }
+  grid.appendChild(rail);
+  for (const d of days) {
+    const col = document.createElement("div");
+    col.className = "cal-col";
+    col.style.height = `${height}px`;
+    col.style.setProperty("--hour", `${60 * scale}px`);
+    for (const e of lanes(items.filter((i) => i.date === d))) col.appendChild(eventBlock(e, lo, scale));
+    if (d === sched.today && sched.base !== undefined) {
+      const at = (nowMs() - evMs(d, "00:00")) / 60000;
+      if (at >= lo && at <= hi) {
+        const line = document.createElement("div");
+        line.className = "cal-now";
+        line.style.top = `${(at - lo) * scale}px`;
+        col.appendChild(line);
+      }
+    }
+    grid.appendChild(col);
+  }
+  box.appendChild(grid);
+  box.scrollTop = keep;
+}
+
+function eventBlock({ i, from, to, col, cols }, lo, scale) {
+  const recs = recsOf(i.key);
+  const live = state.recording && state.currentMeta?.schedule_key === i.key;
+  const past = sched.base !== undefined && evMs(i.date, i.end) < nowMs();
+  const el = document.createElement("div");
+  el.className = `cal-event ${["reserved", "favorite"].includes(i.kind) ? i.kind : "personal"}${past ? " past" : ""}${live ? " live" : ""}`;
+  el.style.top = `${(from - lo) * scale}px`;
+  el.style.height = `${(to - from) * scale - 3}px`;
+  el.style.left = `${(col / cols) * 100}%`;
+  el.style.width = `calc(${100 / cols}% - 4px)`;
+  el.tabIndex = 0;
+  el.setAttribute("role", "button");
+  el.title = `${i.start}–${i.end} ${i.title}`;
+  const status = live ? '<span class="ev-live">● 録音中</span>'
+    : recs.length || i.recorded ? '<span class="ev-done">✓ 録音済み</span>' : "";
+  el.innerHTML =
+    `<div class="ev-top"><span class="ev-time">${escapeHtml(i.start)}–${escapeHtml(i.end)}</span>` +
+    (KIND[i.kind] ? `<span class="tag">${KIND[i.kind]}</span>` : "") + status + "</div>" +
+    `<div class="ev-title">${escapeHtml(i.title)}</div>` +
+    (i.venue ? `<div class="ev-venue">${escapeHtml(i.venue)}</div>` : "");
+  // one tap to record, only on the day itself
+  if (i.date === sched.today && !past && !live && !state.recording) {
+    const b = document.createElement("button");
+    b.className = "row-rec";
+    b.textContent = "● 録音";
+    b.disabled = !!state.busy;
+    b.onclick = (e) => { e.stopPropagation(); closeCalendars(); startItem(i); };
+    el.querySelector(".ev-top").appendChild(b);
+  }
+  el.onclick = () => openPlan(i);
+  el.onkeydown = (e) => {
+    if (e.target === el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openPlan(i); }
+  };
+  return el;
+}
+
+function closeCalendars() {
+  for (const id of ["plan-modal", "week-modal"]) if ($(id).open) $(id).close();
+}
+
+async function openPlan(i) {
+  let recs = recsOf(i.key);
+  if (i.date !== $("list-date").value) { // from the week view
+    try {
+      recs = (await (await fetch(`/api/sessions?date=${i.date}`)).json()).sessions
+        .filter((s) => s.meta.schedule_key === i.key);
+    } catch { recs = []; }
+  }
+  $("plan-title").textContent = i.title;
+  $("plan-info").textContent = [`${dayLabel(i.date)} ${i.start}–${i.end}(現地)`, i.venue, KIND[i.kind] || "予約済み"]
+    .filter(Boolean).join("\n");
+  const box = $("plan-recs");
+  box.replaceChildren();
+  if (recs.length) {
+    const h = document.createElement("h3");
+    h.textContent = `録音 ${recs.length}件`;
+    box.append(h, ...recs.map(recordingRow));
+  }
+  const isToday = i.date === sched.today;
+  const go = $("plan-go");
+  go.textContent = isToday ? "● 録音開始" : "試し録り";
+  go.className = isToday ? "primary-btn" : "ghost-btn";
+  go.disabled = state.recording || !!state.busy;
+  go.onclick = () => { closeCalendars(); startItem(i); };
+  $("plan-note").textContent = state.recording ? "録音中です" : isToday ? ""
+    : "当日(現地)になると「録音開始」に変わります";
+  $("plan-modal").showModal();
+}
+
+for (const b of document.querySelectorAll("[data-close]"))
+  b.addEventListener("click", () => b.closest("dialog").close());
+$("btn-week").addEventListener("click", () => {
+  const days = [...new Set(sched.items.map((i) => i.date))];
+  drawGrid($("cal-week"), days, 1.35);
+  $("week-modal").showModal();
+});
+$("btn-unscheduled").addEventListener("click", () => openUnscheduled());
 
 function recordingRow(s) {
-  const li = document.createElement("li");
-  li.className = s.meta.schedule_key ? "rec" : "";
+  const day = s.meta.started_at.slice(0, 10);
+  const url = `/api/sessions/${day}/${encodeURIComponent(s.dirname)}`;
+  const el = document.createElement("div");
+  el.className = "rec-row";
+  el.dataset.dirname = s.dirname;
   const active = state.recording && state.current?.dirname === s.dirname;
-  const status = active ? '<span class="hq-wait">録音中</span>'
-    : !s.meta.ended_at ? '<span class="hq-wait">中断</span>'
-    : s.hq ? '<span class="hq-tag">HQ✓</span>' : '<span class="hq-wait">HQ処理中…</span>';
-  li.innerHTML =
-    `<span class="sid">${escapeHtml(s.meta.id)}</span>` +
-    `<span class="row-main">${s.meta.schedule_key ? `録音 ${escapeHtml(s.meta.started_at.slice(11, 16))}` : escapeHtml(s.meta.title)}</span>` +
-    (s.meta.test ? '<span class="tag">テスト</span>' : "") + status +
+  const status = active ? "録音中" : !s.meta.ended_at ? "中断" : s.hq ? "" : "高精度版を作成中…";
+  const len = s.meta.ended_at
+    ? Math.max(1, Math.round((new Date(s.meta.ended_at) - new Date(s.meta.started_at)) / 60000)) : null;
+  const sub = [s.meta.started_at.slice(11, 16), len && `${len}分`, s.photos && `写真${s.photos}枚`, status]
+    .filter(Boolean).join(" · ");
+  el.innerHTML =
+    `<button class="rec-open"><span class="rec-name">${escapeHtml(s.meta.title)}` +
+    (s.meta.test ? ' <span class="tag">試し録り</span>' : "") +
+    `</span><span class="rec-sub">${escapeHtml(sub)}</span></button>` +
+    `<details class="row-menu"><summary aria-label="この録音の操作" title="この録音の操作">⋯</summary><div class="menu">` +
     (active ? "" :
-      `<a class="memo-btn" title="音声をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/audio">♪⤓</a>` +
-      `<a class="memo-btn" title="文字起こしをダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/transcript.txt">文字⤓</a>` +
-      (s.summary ? `<a class="memo-btn" title="日本語要約をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/summary.txt">要約⤓</a>` : "") +
-      `<a class="memo-btn" title="記事用(文字起こし+写真)をダウンロード" download href="/api/sessions/${s.meta.started_at.slice(0, 10)}/${encodeURIComponent(s.dirname)}/article.zip">記事⤓</a>`) +
-    (s.photos ? `<span class="tag">📷${s.photos}</span>` : "") +
-    `<button class="memo-btn memo-edit" title="メモ編集">✎</button>` +
-    `<button class="memo-btn del-btn" title="削除">🗑</button>`;
-  li.querySelector(".memo-edit").onclick = () => openMemo(s);
-  li.querySelector(".del-btn").onclick = async () => {
-    if (!confirm(`[${s.meta.id}] ${s.meta.title} を削除しますか?(録音・文字起こし・写真も消えます)`)) return;
-    const date = s.meta.started_at.slice(0, 10);
-    const r = await fetch(`/api/sessions/${date}/${s.dirname}`, { method: "DELETE" });
-    if (!r.ok) alert((await r.json().catch(() => ({}))).error || "削除に失敗しました");
-    if (r.ok && !state.recording && state.selected?.dirname === s.dirname) clearScreen();
+      `<a download href="${url}/audio" title="音声をダウンロード">音声をダウンロード</a>` +
+      `<a download href="${url}/transcript.txt" title="文字起こしをダウンロード">文字起こしをダウンロード</a>` +
+      (s.summary ? `<a download href="${url}/summary.txt" title="日本語要約をダウンロード">日本語要約をダウンロード</a>` : "") +
+      `<a download href="${url}/article.zip" title="記事用(文字起こし+写真)をダウンロード">記事用データをダウンロード</a>`) +
+    `<button class="m-memo">メモを編集</button>` +
+    (active ? "" : '<button class="m-del">ゴミ箱に移動</button>') + "</div></details>";
+  const menu = el.querySelector(".row-menu");
+  menu.querySelector(".menu").addEventListener("click", () => { menu.open = false; });
+  el.querySelector(".rec-open").onclick = () => { closeCalendars(); openSession(day, s.dirname); };
+  el.querySelector(".m-memo").onclick = () => openMemo(s);
+  const del = el.querySelector(".m-del");
+  if (del) del.onclick = async () => {
+    const r = await fetch(url, { method: "DELETE" });
+    if (!r.ok) { alert((await r.json().catch(() => ({}))).error || "移動できませんでした"); return; }
+    if (!state.recording && state.selected?.dirname === s.dirname) clearScreen();
+    el.remove();
     refreshSchedule();
     loadSessions();
+    syncNote("ゴミ箱に移動しました(復元できます)", true);
   };
-  li.onclick = (e) => {
-    if (e.target.closest(".memo-btn")) return;
-    openSession(s.meta.started_at.slice(0, 10), s.dirname);
-  };
-  li.dataset.dirname = s.dirname;
-  return li;
+  return el;
 }
+document.addEventListener("click", (e) => {
+  for (const m of document.querySelectorAll(".row-menu[open]")) if (!m.contains(e.target)) m.open = false;
+});
+
+/* ---------- trash ---------- */
+async function showTrash() {
+  const { items } = await (await fetch("/api/trash")).json();
+  const box = $("trash-list");
+  box.replaceChildren();
+  if (!items.length) box.textContent = "ゴミ箱は空です";
+  for (const s of items) {
+    const url = `/api/trash/${s.date}/${encodeURIComponent(s.dirname)}`;
+    const el = document.createElement("div");
+    el.className = "rec-row";
+    el.innerHTML = `<div class="rec-open"><span class="rec-name">${escapeHtml(s.meta.title)}</span>` +
+      `<span class="rec-sub">${escapeHtml(s.meta.started_at.slice(0, 16).replace("T", " "))}</span></div>` +
+      `<button class="ghost-btn t-back">元に戻す</button><button class="link-btn t-del">完全に削除</button>`;
+    el.querySelector(".t-back").onclick = async () => {
+      if (!(await fetch(`${url}/restore`, { method: "POST" })).ok) alert("元に戻せませんでした");
+      await showTrash();
+      refreshSchedule();
+      loadSessions();
+    };
+    el.querySelector(".t-del").onclick = async () => {
+      if (!confirm(`「${s.meta.title}」の音声・文字起こし・写真を完全に削除しますか?元に戻せません。`)) return;
+      if (!(await fetch(url, { method: "DELETE" })).ok) alert("削除できませんでした");
+      showTrash();
+    };
+    box.appendChild(el);
+  }
+}
+$("btn-trash").addEventListener("click", () => { $("trash-modal").showModal(); showTrash(); });
 
 function markSelected() {
-  for (const li of $("session-list").children)
-    li.classList.toggle("selected", !!li.dataset.dirname && li.dataset.dirname === state.selected?.dirname);
+  for (const el of document.querySelectorAll(".rec-row[data-dirname]"))
+    el.classList.toggle("selected", el.dataset.dirname === state.selected?.dirname);
 }
 
 // Show a saved recording: chat always; captions/summary only when not recording
@@ -1175,9 +1377,11 @@ async function refreshSchedule() {
   }
   if (!sched.initialized) {
     sched.initialized = true;
-    if (!state.recording && sched.items.some((i) => i.date === sched.today)) setDate(sched.today);
+    if (!state.recording && sched.items.length)
+      setDate(sched.items.find((i) => i.date >= sched.today)?.date || today());
   }
   renderChips();
+  renderDay();
   renderHero();
 }
 
@@ -1218,18 +1422,27 @@ window.addEventListener("message", async (ev) => {
   }
 });
 
+function dayLabel(date) {
+  const d = new Date(date + "T00:00Z");
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${"日月火水木金土"[d.getUTCDay()]})`;
+}
+
 function renderChips() {
   const box = $("day-chips");
-  box.replaceChildren();
-  for (const date of new Set(sched.items.map((i) => i.date))) {
+  const chosen = $("list-date").value;
+  const plans = {};
+  for (const i of sched.items) plans[i.date] = (plans[i.date] || 0) + 1;
+  const days = [...new Set([...Object.keys(plans), ...Object.keys(cal.days), today(), chosen])].filter(Boolean).sort();
+  box.replaceChildren(...days.map((date) => {
     const b = document.createElement("button");
-    b.className = "ghost-btn";
-    const d = new Date(date + "T00:00Z");
-    b.textContent = `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${"日月火水木金土"[d.getUTCDay()]})`;
-    b.setAttribute("aria-pressed", String($("list-date").value === date));
+    b.className = "day-tab";
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(chosen === date));
+    const n = plans[date] ? `予定${plans[date]}` : "", m = cal.days[date] ? `録音${cal.days[date]}` : "";
+    b.innerHTML = `<b>${dayLabel(date)}</b><small>${[n, m].filter(Boolean).join("・") || "予定なし"}</small>`;
     b.onclick = () => setDate(date);
-    box.appendChild(b);
-  }
+    return b;
+  }));
 }
 
 // Sessions to offer: those open now (from 15 min before start), else the next slot
@@ -1269,7 +1482,8 @@ function renderHero() {
       `<button class="primary-btn"></button>`;
     const b = card.querySelector("button");
     b.textContent = state.busy ? "処理中…"
-      : state.recording ? "停止して次を開始" : isToday ? "● 録音開始" : "● テスト録音";
+      : state.recording ? "停止して次を開始" : isToday ? "● 録音開始" : "試し録り";
+    if (!state.recording && !isToday) b.className = "ghost-btn";
     b.disabled = !!state.busy;
     b.onclick = () => startItem(i);
     box.appendChild(card);
@@ -1289,7 +1503,6 @@ async function startItem(item) {
 
 /* ---------- init ---------- */
 $("list-date").value = today();
-$("list-date").addEventListener("change", () => setDate($("list-date").value));
 refreshSchedule();
 setInterval(refreshSchedule, 30000);
 refreshStatus();

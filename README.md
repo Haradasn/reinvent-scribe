@@ -73,7 +73,7 @@ date,start,end,id,title,venue,kind
 - 時刻は現地時間(既定 `EVENT_TZ=America/Los_Angeles`)。PC の時刻設定には影響されません
 - `id` は空でよい(曜日+開始時刻になります)。`kind` は reserved / favorite / personal
 - カンマを含む項目は `"` で囲む。保存後30秒以内に画面へ反映されます
-- 予定日以外に録音すると「テスト」扱いになり、予定は録音済みになりません
+- 予定日以外は「試し録り」になり、予定は録音済みになりません
 
 ### 「予定を更新」ボタン(Chrome 拡張)
 

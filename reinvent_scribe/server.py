@@ -586,8 +586,40 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         if rec is not None and rec.session.dir == session.dir:
             return JSONResponse({"error": "録音中のセッションは削除できません"},
                                 status_code=409)
-        shutil.rmtree(session.dir)
+        if session.dir.name in state["hq_pending"]:
+            return JSONResponse({"error": "高精度版の作成が終わってから削除してください"},
+                                status_code=409)
+        store.trash(session)
         return {"ok": True}
+
+    @app.get("/api/trash")
+    def list_trash():
+        return {"items": [{"date": s.dir.parent.name, "dirname": s.dir.name,
+                           "meta": s.meta} for s in store.trashed()]}
+
+    def _trashed(date: str, dirname: str):
+        _check_date(date)
+        for s in store.trashed():
+            if s.dir.parent.name == date and s.dir.name == dirname:
+                return s
+        raise HTTPException(status_code=404, detail="not in trash")
+
+    @app.post("/api/trash/{date}/{dirname}/restore")
+    def restore_session(date: str, dirname: str):
+        return {"dirname": store.restore(_trashed(date, dirname)).name}
+
+    @app.delete("/api/trash/{date}/{dirname}")
+    def purge_session(date: str, dirname: str):
+        shutil.rmtree(_trashed(date, dirname).dir)
+        return {"ok": True}
+
+    @app.get("/api/recording-days")
+    def recording_days():
+        days: dict[str, int] = {}
+        for s in store.all():
+            d = s.meta.get("schedule_date") or s.dir.parent.name
+            days[d] = days.get(d, 0) + 1
+        return {"days": days}
 
     @app.get("/api/sessions")
     def list_sessions(date: str):

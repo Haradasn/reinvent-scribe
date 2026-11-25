@@ -144,3 +144,21 @@ def test_send_summary_of_one_recording(tmp_path):
         assert r.json()["attachments"] == 1
         assert [p.get_filename() for p in sent[0].iter_attachments()] == [name + ".txt"]
         assert "margin-left:20px" in sent[0].get_body(("html",)).get_content()
+
+
+def test_delete_goes_to_trash_and_can_be_restored(tmp_path):
+    with client(tmp_path) as c:
+        date, name = record(c)
+        while c.get("/api/status").json()["hq_pending"]:
+            pass
+        url = f"/api/sessions/{date}/{name}"
+        assert c.delete(url).status_code == 200
+        assert c.get(url).status_code == 404 and c.get("/api/recording-days").json()["days"] == {}
+        assert c.get("/api/trash").json()["items"][0]["dirname"] == name
+        assert c.post(f"/api/trash/{date}/{name}/restore").json()["dirname"] == name
+        assert c.get(url + "/audio").status_code == 200
+        assert c.get("/api/recording-days").json()["days"] == {date: 1}
+        c.delete(url)
+        assert c.delete(f"/api/trash/{date}/nope").status_code == 404
+        assert c.delete(f"/api/trash/{date}/{name}").status_code == 200
+        assert c.get("/api/trash").json()["items"] == []
