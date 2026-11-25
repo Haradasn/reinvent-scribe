@@ -812,7 +812,7 @@ function showTarget() {
   for (const row of dayBox.querySelectorAll(".agenda-row")) {
     const on = row.dataset.key === item?.key;
     row.classList.toggle("selected", on);
-    row.firstChild.setAttribute("aria-pressed", String(on));
+    row.querySelector(".agenda-main").setAttribute("aria-pressed", String(on));
     row.classList.toggle("choose", !!clash?.some((c) => c.key === row.dataset.key));
   }
   const box = $("rec-target");
@@ -831,6 +831,7 @@ function showTarget() {
 function drawAgenda(box, plans) {
   if (!plans.length) return;
   let marked = plans[0].date !== sched.today;
+  const next = sched.base === undefined ? [] : candidates().map((i) => i.key);
   for (const i of plans) {
     const past = sched.base !== undefined && evMs(i.date, i.end) < nowMs();
     const isToday = i.date === sched.today;
@@ -848,13 +849,17 @@ function drawAgenda(box, plans) {
     const row = document.createElement("div");
     row.className = `agenda-row ${["reserved", "favorite"].includes(i.kind) ? i.kind : "personal"}` +
       `${past ? " past" : ""}${live ? " live" : open ? " open" : ""}`;
+    const wait = evMs(i.date, i.start) - nowMs();
+    const isNext = next.includes(i.key) && !live;
+    if (isNext) row.classList.add("next-up");
     row.dataset.key = i.key;
     row.innerHTML =
+      (isNext ? `<div class="next-label">${wait <= 0 ? "開催中" : `次の予定 · ${until(wait)}`}</div>` : "") +
       `<button class="agenda-main"><span class="agenda-time">${escapeHtml(i.start)}<small>${escapeHtml(i.end)}</small></span>` +
       `<span class="agenda-body"><span class="agenda-title">${escapeHtml(i.title)}</span>` +
       (i.venue ? `<span class="agenda-venue">${escapeHtml(i.venue)}</span>` : "") +
       `<span class="agenda-tags">${statusOf(i)}${KIND[i.kind] ? `<span class="tag">${KIND[i.kind]}</span>` : ""}${clash ? '<span class="tag">時間が重複</span>' : ""}</span></span></button>`;
-    row.firstChild.onclick = () => pickItem(i);
+    row.querySelector(".agenda-main").onclick = () => pickItem(i);
     box.appendChild(row);
     // its recordings belong right under the session
     for (const s of recs) box.appendChild(recordingRow(s, true));

@@ -601,3 +601,7 @@ button.rec-open { cursor: pointer; }
 .wd-text h4:nth-of-type(2) + p { color: #a5adcf; font-size: 0.82rem; line-height: 1.65; }
 .cal-event.selected { outline: 2px solid var(--accent2); opacity: 1; z-index: 4; }
 @media (max-width: 800px) { .week-body { flex-direction: column; } .week-detail { flex: 0 1 45%; border-left: 0; border-top: 1px solid var(--border); padding: 12px 4px; } }
+
+/* next up: a label and cyan edge, so it never looks like the purple selection */
+.agenda-row.next-up { flex-direction: column; align-items: stretch; border-left-color: var(--accent2); }
+.next-label { padding: 5px 10px; font-size: 0.75rem; font-weight: 700; color: #06222c; background: var(--accent2); border-radius: 0 10px 0 0; }
