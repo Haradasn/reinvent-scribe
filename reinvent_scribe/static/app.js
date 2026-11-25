@@ -169,7 +169,11 @@ async function stopRecording() {
   state.recording = false;
   clearInterval(state.timerId);
   $("btn-record").classList.remove("recording");
-  $("rec-title").textContent = "待機中(高精度文字起こしをバックグラウンド実行中)";
+  $("rec-title").textContent = "待機中";
+  const note = document.createElement("div");
+  note.className = "captions-empty";
+  note.textContent = "停止しました。高精度文字起こしをバックグラウンドで実行中 — 完了すると一覧に HQ✓ が付きます";
+  $("captions").appendChild(note);
   loadSessions();
 }
 
