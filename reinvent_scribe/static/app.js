@@ -33,15 +33,15 @@ function syncRecordingState(s) {
     state.startedAt = Date.parse(s.session.meta.started_at);
     clearInterval(state.timerId);
     state.timerId = setInterval(tick, 1000);
-    $("btn-record").classList.add("recording");
-    $("btn-pause").classList.remove("hidden");
+    state.paused = !!s.paused;
+    if (state.paused) { clearInterval(state.timerId); state.pausedAt = Date.now(); }
+    setRecorderUI(state.paused ? "paused" : "recording");
     $("rec-title").textContent = `[${s.session.meta.id}] ${s.session.meta.title}`;
   } else if (!s.recording && state.recording) {
     state.recording = false;
     state.paused = false;
     clearInterval(state.timerId);
-    $("btn-record").classList.remove("recording");
-    $("btn-pause").classList.add("hidden");
+    setRecorderUI("idle");
     $("rec-title").textContent = "待機中";
   }
 }
@@ -57,7 +57,7 @@ const ctx = canvas.getContext("2d");
 let wavePhase = 0;
 function drawWave() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (state.recording) {
+  if (state.recording && !state.paused) {
     ctx.beginPath();
     for (let x = 0; x < canvas.width; x++) {
       const t = x / canvas.width;
@@ -177,8 +177,35 @@ function escapeHtml(s) {
 }
 
 /* ---------- record flow ---------- */
+// Main button: idle=start, recording=pause, paused=resume. Stop is its own button.
+function setRecorderUI(mode) {
+  // mode: "idle" | "recording" | "paused"
+  $("btn-record").dataset.state = mode;
+  $("btn-record").classList.toggle("recording", mode === "recording");
+  $("btn-record").title = { idle: "録音開始", recording: "一時停止", paused: "再開" }[mode];
+  $("btn-stop").classList.toggle("hidden", mode === "idle");
+  $("rec-timer").classList.toggle("paused", mode === "paused");
+}
+
 $("btn-record").addEventListener("click", async () => {
-  if (state.recording) return stopRecording();
+  if (state.recording && !state.paused) {
+    const r = await fetch("/api/sessions/pause", { method: "POST" });
+    if (!r.ok) return;
+    state.paused = true;
+    state.pausedAt = Date.now();
+    clearInterval(state.timerId);
+    setRecorderUI("paused");
+    return;
+  }
+  if (state.recording && state.paused) {
+    const r = await fetch("/api/sessions/resume", { method: "POST" });
+    if (!r.ok) { alert("再開に失敗しました"); return; }
+    state.paused = false;
+    state.startedAt += Date.now() - state.pausedAt;
+    state.timerId = setInterval(tick, 1000);
+    setRecorderUI("recording");
+    return;
+  }
   // prefill from schedule
   try {
     const r = await (await fetch("/api/schedule")).json();
@@ -227,46 +254,19 @@ async function startRecording(id, title, memo) {
   state.selected = state.current;
   state.startedAt = Date.now();
   state.timerId = setInterval(tick, 1000);
-  $("btn-record").classList.add("recording");
-  $("btn-pause").classList.remove("hidden");
-  $("btn-pause").textContent = "⏸ 一時停止";
+  setRecorderUI("recording");
   $("rec-title").textContent = `[${id}] ${title}`;
   $("captions").innerHTML = "";
 }
 
-$("btn-pause").addEventListener("click", async () => {
-  if (!state.recording) return;
-  if (!state.paused) {
-    const r = await fetch("/api/sessions/pause", { method: "POST" });
-    if (!r.ok) return;
-    state.paused = true;
-    state.pausedAt = Date.now();
-    clearInterval(state.timerId);
-    $("btn-pause").textContent = "▶ 再開";
-    $("btn-record").classList.remove("recording");
-    $("rec-title").textContent += "(一時停止中)";
-  } else {
-    const r = await fetch("/api/sessions/resume", { method: "POST" });
-    if (!r.ok) {
-      alert("再開に失敗しました");
-      return;
-    }
-    state.paused = false;
-    state.startedAt += Date.now() - state.pausedAt;
-    state.timerId = setInterval(tick, 1000);
-    $("btn-pause").textContent = "⏸ 一時停止";
-    $("btn-record").classList.add("recording");
-    $("rec-title").textContent = $("rec-title").textContent.replace("(一時停止中)", "");
-  }
-});
+$("btn-stop").addEventListener("click", () => stopRecording());
 
 async function stopRecording() {
   await fetch("/api/sessions/stop", { method: "POST" });
   state.recording = false;
   state.paused = false;
   clearInterval(state.timerId);
-  $("btn-record").classList.remove("recording");
-  $("btn-pause").classList.add("hidden");
+  setRecorderUI("idle");
   $("rec-title").textContent = "待機中";
   const note = document.createElement("div");
   note.className = "captions-empty";

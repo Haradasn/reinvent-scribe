@@ -25,13 +25,17 @@
   <!-- Left: recorder + captions -->
   <section class="panel glass main-panel">
     <div class="recorder">
-      <button id="btn-record" class="record-btn" title="録音開始">
-        <span class="record-icon"></span>
+      <button id="btn-record" class="record-btn" data-state="idle" title="録音開始">
+        <span class="icon-circle"></span>
+        <span class="icon-pause"><i></i><i></i></span>
+        <span class="icon-play"></span>
+      </button>
+      <button id="btn-stop" class="stop-btn hidden" title="停止">
+        <span class="icon-stop"></span>
       </button>
       <div class="recorder-info">
         <div id="rec-title" class="rec-title">待機中</div>
         <div id="rec-timer" class="rec-timer">00:00:00</div>
-      <button id="btn-pause" class="ghost-btn hidden">⏸ 一時停止</button>
       </div>
       <canvas id="waveform" width="320" height="56"></canvas>
     </div>

@@ -100,11 +100,42 @@ body {
   position: relative;
 }
 .record-btn:hover { transform: scale(1.06); box-shadow: 0 0 24px rgba(124,108,255,0.45); }
-.record-icon {
-  width: 22px; height: 22px; border-radius: 50%;
-  background: var(--danger); transition: border-radius 0.25s, transform 0.25s;
+
+/* state icons: exactly one visible per data-state */
+.record-btn .icon-circle {
+  width: 22px; height: 22px; border-radius: 50%; background: var(--danger);
 }
-.recording .record-icon { border-radius: 5px; transform: scale(0.8); }
+.record-btn .icon-pause { display: none; gap: 5px; }
+.record-btn .icon-pause i {
+  display: block; width: 7px; height: 22px; border-radius: 2px;
+  background: #fff; font-style: normal;
+}
+.record-btn .icon-play {
+  display: none; width: 0; height: 0; margin-left: 4px;
+  border-top: 12px solid transparent; border-bottom: 12px solid transparent;
+  border-left: 20px solid #fff;
+}
+.record-btn[data-state="recording"] .icon-circle,
+.record-btn[data-state="paused"] .icon-circle { display: none; }
+.record-btn[data-state="recording"] .icon-pause { display: flex; }
+.record-btn[data-state="paused"] .icon-play { display: block; }
+
+.stop-btn {
+  width: 48px; height: 48px; border-radius: 50%; cursor: pointer;
+  border: 2px solid var(--border); background: rgba(255,255,255,0.06);
+  display: grid; place-items: center; flex: 0 0 48px;
+  transition: transform 0.2s, border-color 0.25s;
+  animation: slide-in 0.25s ease;
+}
+.stop-btn:hover { transform: scale(1.08); border-color: var(--danger); }
+.icon-stop {
+  width: 16px; height: 16px; border-radius: 3px; background: var(--danger);
+}
+
+.rec-timer.paused::after {
+  content: " 一時停止中"; color: #ffd166; font-size: 0.8em;
+}
+
 .recording.record-btn::before, .recording.record-btn::after {
   content: ""; position: absolute; inset: -2px; border-radius: 50%;
   border: 2px solid rgba(255, 77, 109, 0.5);
