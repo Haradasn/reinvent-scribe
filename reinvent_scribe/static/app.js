@@ -56,7 +56,7 @@ function syncRecordingState(s) {
     state.paused = false;
     clearInterval(state.timerId);
     setRecorderUI("idle");
-    $("rec-title").textContent = "待機中";
+    $("rec-title").textContent = stoppedTitle();
   }
 }
 function setChip(id, text, ok) {
@@ -469,10 +469,15 @@ $("btn-record").addEventListener("click", async () => {
     setRecorderUI("recording");
     return;
   }
-  const open = sched.base === undefined ? [] : candidates().filter((i) =>
-    i.date === sched.today && evMs(i.date, i.start) - 15 * 60000 <= nowMs());
-  if (open.length === 1) startItem(open[0]);
-  else openUnscheduled();
+  const { item, clash } = target();
+  if (item) { startItem(item); return; }
+  if (!clash) { openUnscheduled(); return; }
+  const row = dayBox.querySelector(".agenda-row.choose");
+  jumpTo(row, 60);
+  for (const r of dayBox.querySelectorAll(".agenda-row.choose")) {
+    r.classList.add("flash");
+    setTimeout(() => r.classList.remove("flash"), 1600);
+  }
 });
 
 function openUnscheduled() {
@@ -524,6 +529,7 @@ async function doStart(payload) {
   level.warning = null;
   level.at = performance.now();
   clearScreen();
+  cal.pick = null;
   state.recording = true;
   state.paused = false;
   state.current = { dirname: data.dirname, date: data.date };
@@ -565,7 +571,7 @@ async function stopRecording() {
   state.paused = false;
   clearInterval(state.timerId);
   setRecorderUI("idle");
-  $("rec-title").textContent = "待機中";
+  $("rec-title").textContent = stoppedTitle();
   const note = document.createElement("div");
   note.className = "captions-empty";
   note.textContent = "停止しました。高精度文字起こしをバックグラウンドで実行中 — 完了すると一覧に HQ✓ が付きます";
@@ -616,9 +622,10 @@ function renderList() {
   }
   renderChips();
   markSelected();
+  showTarget();
   if (!cal.placed && sched.base !== undefined && sched.items.length) {
     cal.placed = true;
-    const at = dayBox.querySelector(".agenda-row.live, .agenda-row.next")
+    const at = dayBox.querySelector(".agenda-row.live, .agenda-row.selected, .agenda-row.choose")
       || dayBox.querySelector(".agenda-now");
     if (at) jumpTo(at, 60, false);
     else jumpTo(sectionOf(listDays().find((d) => d >= sched.today) || listDays().at(-1)), 0, false);
@@ -773,10 +780,57 @@ function statusOf(i) {
 }
 
 // The day as a plain list in time order: readable in a narrow full-height column
+/* One record button: it records the selected session */
+const isPast = (i) => evMs(i.date, i.end) <= nowMs();
+
+// {item} to record, or {clash} when several are on and the user must choose
+function target() {
+  if (sched.base === undefined) return {};
+  const picked = sched.items.find((i) => i.key === cal.pick);
+  if (picked && !isPast(picked)) return { item: picked };
+  const c = candidates();
+  return c.length > 1 ? { clash: c } : { item: c[0] };
+}
+
+const stoppedTitle = () => state.currentMeta
+  ? `[${state.currentMeta.id}] ${state.currentMeta.title}(録音済み)` : "待機中";
+
+function pickItem(i) {
+  const recs = recsOf(i.key);
+  if (!state.recording && !isPast(i)) cal.pick = i.key;
+  if (recs.length) { // show what was recorded
+    const s = recs.at(-1);
+    openSession(s.meta.started_at.slice(0, 10), s.dirname);
+  } else if (!state.recording && (state.viewing || state.current)) {
+    clearScreen();
+  }
+  showTarget();
+}
+
+function showTarget() {
+  const { item, clash } = state.recording ? {} : target();
+  for (const row of dayBox.querySelectorAll(".agenda-row")) {
+    const on = row.dataset.key === item?.key;
+    row.classList.toggle("selected", on);
+    row.firstChild.setAttribute("aria-pressed", String(on));
+    row.classList.toggle("choose", !!clash?.some((c) => c.key === row.dataset.key));
+  }
+  const box = $("rec-target");
+  if (state.recording) { box.textContent = ""; return; }
+  const when = item && `${dayLabel(item.date)} ${item.start}–${item.end}`;
+  if (state.viewing || state.current) { // a finished recording is on screen
+    box.textContent = item ? `● を押すと次を録音: ${when} ${item.title}` : "";
+  } else {
+    $("rec-title").textContent = item ? item.title : clash ? "録音するセッションを左で選んでください" : "待機中";
+    box.textContent = !item ? (clash ? "時間が重なる予定があります" : "")
+      : [`${when}(現地)`, item.venue, item.date === sched.today ? until(evMs(item.date, item.start) - nowMs())
+        : "当日ではないので「試し録り」として保存されます"].filter(Boolean).join(" · ");
+  }
+}
+
 function drawAgenda(box, plans) {
   if (!plans.length) return;
   let marked = plans[0].date !== sched.today;
-  const next = sched.base === undefined || state.recording ? [] : candidates().map((i) => i.key);
   for (const i of plans) {
     const past = sched.base !== undefined && evMs(i.date, i.end) < nowMs();
     const isToday = i.date === sched.today;
@@ -790,28 +844,17 @@ function drawAgenda(box, plans) {
       n.textContent = `現在 ${new Date(nowMs()).toISOString().slice(11, 16)}`;
       box.appendChild(n);
     }
-    const isNext = next.includes(i.key);
     const clash = plans.some((o) => o !== i && o.start < i.end && i.start < o.end);
     const row = document.createElement("div");
     row.className = `agenda-row ${["reserved", "favorite"].includes(i.kind) ? i.kind : "personal"}` +
-      `${past ? " past" : ""}${live ? " live" : open ? " open" : ""}${isNext ? " next" : ""}`;
+      `${past ? " past" : ""}${live ? " live" : open ? " open" : ""}`;
     row.dataset.key = i.key;
     row.innerHTML =
-      `<div class="agenda-main"><span class="agenda-time">${escapeHtml(i.start)}<small>${escapeHtml(i.end)}</small></span>` +
+      `<button class="agenda-main"><span class="agenda-time">${escapeHtml(i.start)}<small>${escapeHtml(i.end)}</small></span>` +
       `<span class="agenda-body"><span class="agenda-title">${escapeHtml(i.title)}</span>` +
       (i.venue ? `<span class="agenda-venue">${escapeHtml(i.venue)}</span>` : "") +
-      `<span class="agenda-tags">${statusOf(i)}${KIND[i.kind] ? `<span class="tag">${KIND[i.kind]}</span>` : ""}${clash ? '<span class="tag">時間が重複</span>' : ""}</span></span></div>`;
-    if (!past && !state.recording) {
-      const b = document.createElement("button");
-      b.className = !isToday ? "try-btn" : isNext ? "primary-btn" : "row-rec";
-      b.textContent = !isToday ? "試し録り" : state.busy ? "処理中…"
-        : isNext ? `● 録音開始(${until(evMs(i.date, i.start) - nowMs())})` : "録音";
-      b.setAttribute("aria-label", `${i.title} を${isToday ? "録音" : "試し録り"}`);
-      if (!isToday) b.title = "当日(現地)になると「録音」に変わります";
-      b.disabled = !!state.busy;
-      b.onclick = () => startItem(i);
-      row.appendChild(b);
-    }
+      `<span class="agenda-tags">${statusOf(i)}${KIND[i.kind] ? `<span class="tag">${KIND[i.kind]}</span>` : ""}${clash ? '<span class="tag">時間が重複</span>' : ""}</span></span></button>`;
+    row.firstChild.onclick = () => pickItem(i);
     box.appendChild(row);
     // its recordings belong right under the session
     for (const s of recs) box.appendChild(recordingRow(s, true));
@@ -839,6 +882,7 @@ function eventBlock({ i, from, to, col, cols }, lo, scale) {
     $("week-modal").close();
     const row = dayBox.querySelector(`.agenda-row[data-key="${CSS.escape(i.key)}"]`);
     jumpTo(row, 60);
+    pickItem(i);
     row?.classList.add("flash");
     setTimeout(() => row?.classList.remove("flash"), 1600);
   };
@@ -956,6 +1000,7 @@ async function openSession(date, dirname) {
   }
   if (state.recording) return;
   state.viewing = true;
+  showTarget();
   $("rec-title").textContent = `[${d.meta.id}] ${d.meta.title}(保存済み)`;
   if (d.segments.length || d.photos.length) $("captions").replaceChildren();
   else setPlaceholder("captions", "この録音の文字起こしはありません");

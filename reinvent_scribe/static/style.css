@@ -577,3 +577,13 @@ button.rec-open { cursor: pointer; }
 @media (hover: none) { .try-btn { opacity: 1; position: static; margin-right: 8px; } }
 .rest-title { font-size: 0.75rem; color: var(--muted); margin: 10px 2px 6px; }
 .row-menu[open] { z-index: 30; }
+
+.agenda-main { cursor: pointer; width: 100%; }
+.agenda-main:hover { background: rgba(255,255,255,0.06); }
+.agenda-row.selected { background: rgba(124,108,255,0.3); outline: 2px solid var(--accent); outline-offset: -1px; opacity: 1; }
+.agenda-row.choose { outline: 2px dashed rgba(126,243,192,0.6); outline-offset: -1px; }
+.agenda-row.flash { outline: 3px solid var(--accent2); }
+.rec-target { color: #a5adcf; font-size: 0.78rem; line-height: 1.5; margin-top: 2px; }
+.rec-target:empty { display: none; }
+.recorder-info { flex: 1; }
+.record-btn[data-state="idle"] ~ #waveform { display: none; }
