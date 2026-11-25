@@ -5,7 +5,7 @@ description = "Local recording + realtime English transcription + Japanese summa
 requires-python = ">=3.11"
 dependencies = [
     "fastapi",
-    "uvicorn",
+    "uvicorn[standard]",
     "sounddevice",
     "faster-whisper",
     "httpx",

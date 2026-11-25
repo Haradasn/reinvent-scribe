@@ -273,3 +273,4 @@ function addChat(cls, text) {
 refreshStatus();
 setInterval(refreshStatus, 10000);
 loadSessions();
+setInterval(loadSessions, 15000); // fallback when WS is unavailable
