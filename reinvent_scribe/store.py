@@ -2,7 +2,6 @@ import json
 import os
 import re
 import threading
-import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -70,53 +69,14 @@ class Session:
     def update_memo(self, memo: str) -> None:
         self.update_meta(memo=memo)
 
-    # ---------- notes: the listener's own lines, placed on the audio timeline ----------
-    def notes(self) -> list[dict]:
-        path = self.dir / "notes.json"
-        try:
-            items = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return []
-        return [n for n in items if isinstance(n, dict) and n.get("text")]
+    def memo_lines(self) -> list[str]:
+        return [x.rstrip() for x in (self.meta.get("memo") or "").splitlines() if x.strip()]
 
-    def _save_notes(self, items: list[dict]) -> None:
-        tmp = self.dir / "notes.tmp"
-        tmp.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, self.dir / "notes.json")
-
-    def add_note(self, text: str, at: float) -> dict:
-        note = {"id": uuid.uuid4().hex[:12], "at": at, "text": text}
-        with _meta_lock:
-            self._save_notes([*self.notes(), note])
-        return note
-
-    def delete_note(self, nid: str) -> bool:
-        with _meta_lock:
-            items = self.notes()
-            kept = [n for n in items if n.get("id") != nid]
-            if len(kept) == len(items):
-                return False
-            self._save_notes(kept)
-            return True
-
-    def notes_on_timeline(self, live: bool = False) -> list[dict]:
-        """Each note with its place in the audio (a note written later goes last).
-
-        live: this is the recording in progress.
-        """
-        from .photos import position
-        out = [{"id": n["id"], "text": n["text"], "pos": round(position(self, n["at"], live), 1)}
-               for n in self.notes()]
-        return sorted(out, key=lambda n: n["pos"])
-
-    def notes_text(self) -> str:
-        lines = [f"[{_fmt_ts(n['pos'])}] {n['text']}" for n in self.notes_on_timeline()]
-        return ("\n\n## 聴講者のメモ(発言ではない)\n" + "\n".join(lines)) if lines else ""
-
-    def impressions(self) -> list[str]:
-        """The memo and the notes: what the listener thought, for the report."""
-        out = [self.meta["memo"]] if self.meta.get("memo") else []
-        return out + [n["text"] for n in self.notes_on_timeline()]
+    def memo_text(self) -> str:
+        """The listener's notepad, as context for the AI (not what was said)."""
+        lines = self.memo_lines()
+        return ("\n\n## 聴講者のメモ(発言ではない。> は字幕からの引用)\n" + "\n".join(lines)
+                if lines else "")
 
     def finalize(self, ended_at: datetime | None = None) -> None:
         ended = ended_at or datetime.now()
@@ -158,11 +118,10 @@ class Session:
 
     def transcript_export(self) -> str:
         """Plain text that opens anywhere: English with its translation."""
-        rows = [(s["ts"], 0, f"[{_fmt_ts(s['ts'])}]\n{s['text']}"
-                 + (f"\n{s['ja']}" if s["ja"] else "")) for s in self.segments()]
-        rows += [(n["pos"], 1, f"[{_fmt_ts(n['pos'])}] メモ: {n['text']}")
-                 for n in self.notes_on_timeline()]
-        blocks = [self._export_head()] + [r[2] for r in sorted(rows, key=lambda r: r[:2])]
+        blocks = [self._export_head()]
+        for s in self.segments():
+            blocks.append(f"[{_fmt_ts(s['ts'])}]\n{s['text']}"
+                          + (f"\n{s['ja']}" if s["ja"] else ""))
         return "\n\n".join(blocks) + "\n"
 
     def best_transcript(self) -> str:

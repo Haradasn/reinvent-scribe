@@ -53,10 +53,6 @@ class MemoBody(BaseModel):
     memo: str
 
 
-class NoteBody(BaseModel):
-    text: str
-
-
 class ReportBody(BaseModel):
     mention: str = ""
 
@@ -606,26 +602,6 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         session.update_memo(body.memo)
         return {"ok": True}
 
-    def _is_live(session) -> bool:
-        rec = state["recording"]
-        return rec is not None and rec.session.dir == session.dir
-
-    @app.post("/api/sessions/{date}/{dirname}/notes")
-    def add_note(date: str, dirname: str, body: NoteBody):
-        session = _get_session(date, dirname)
-        text = body.text.strip()
-        if not text or len(text) > 2000:
-            return JSONResponse({"error": "メモは1〜2000文字で書いてください"}, status_code=400)
-        note = session.add_note(text, time.time())
-        live = _is_live(session)
-        return next(n for n in session.notes_on_timeline(live) if n["id"] == note["id"])
-
-    @app.delete("/api/sessions/{date}/{dirname}/notes/{nid}")
-    def delete_note(date: str, dirname: str, nid: str):
-        if not re.fullmatch(r"[0-9a-f]{12}", nid) or not _get_session(date, dirname).delete_note(nid):
-            raise HTTPException(status_code=404, detail="note not found")
-        return {"ok": True}
-
     @app.delete("/api/sessions/{date}/{dirname}")
     def delete_session(date: str, dirname: str):
         session = _get_session(date, dirname)
@@ -685,7 +661,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
                 {"error": "画面右上の「設定」で、翻訳・要約の設定をしてください。"},
                 status_code=503)
         transcript = (session.best_transcript() + photos.slide_text(session)
-                      + session.notes_text())
+                      + session.memo_text())
         answer = transcript_chat(llm, transcript, history=session.chat_history()[-20:],
                                  question=body.question)
         if answer is None:
@@ -968,8 +944,7 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         s = _get_session(date, dirname)
         return {"meta": s.meta, "segments": s.segments(),
                 "summary": s.summary_text(), "chat": s.chat_history(),
-                "photos": photos.for_session(s),
-                "notes": s.notes_on_timeline(_is_live(s))}
+                "photos": photos.for_session(s)}
 
     # ---------- setup ----------
     @app.get("/api/setup")

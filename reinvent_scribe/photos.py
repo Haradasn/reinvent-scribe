@@ -75,14 +75,9 @@ def span(session) -> tuple[float, float]:
     return start, end
 
 
-def position(session, epoch: float, live: bool = False) -> float:
-    """Seconds into the audio (which does not advance while paused).
-
-    live: the recording is still running, so the saved audio may lag behind.
-    """
+def position(session, epoch: float) -> float:
+    """Seconds into the audio (which does not advance while paused)."""
     start, end = span(session)
-    if live and not session.meta.get("ended_at"):
-        end = max(end, time.time())
     t = min(max(epoch, start), end)
     paused = sum(max(0.0, min(t, b or end) - a)
                  for a, b in session.meta.get("pauses", []) if a < t)
@@ -234,14 +229,14 @@ class PhotoStore:
             if p["text"] and not p["text"].startswith(NO_SLIDE):
                 note += "\n\n> " + p["text"].replace("\n", "\n> ")
             rows.append((int(p["pos"]), 1, note))
-        for n in session.notes_on_timeline():
-            rows.append((int(n["pos"]), 2, f"[{_fmt_ts(n['pos'])}] **メモ**: {n['text']}"))
         rows.sort(key=lambda r: r[:2])
         doc = [f"# [{m['id']}] {m['title']}", "", f"- 日時: {m['started_at'][:16]}",
-               f"- 会場: {m.get('venue', '')}", f"- メモ: {m.get('memo', '')}", ""]
+               f"- 会場: {m.get('venue', '')}", ""]
+        if session.memo_lines():
+            doc += ["## 自分のメモ", "", *session.memo_lines(), ""]
         if session.summary_text():
             doc += ["## 日本語要約", "", session.summary_text(), ""]
-        doc += ["## 文字起こし・写真・メモ(時刻順)", ""]
+        doc += ["## 文字起こしと写真(時刻順)", ""]
         doc += [x for r in rows for x in (r[2], "")]
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
