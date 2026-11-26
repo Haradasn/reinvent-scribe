@@ -1101,10 +1101,10 @@ async function openSession(date, dirname) {
 function noteTarget() { return state.viewing ? state.selected : state.current; }
 function updateNoteForm() {
   const t = noteTarget();
-  $("note-input").disabled = $("btn-note").disabled = !t;
+  $("note-input").disabled = !t;
   $("note-input").placeholder = !t ? "録音中か、録音を開いている時に書けます"
-    : state.recording && !state.viewing ? "気づいたことを書いて Enter(字幕の今の位置に入ります)"
-    : "この録音にメモを追加(最後に入ります)";
+    : state.recording && !state.viewing ? "書いて Enter で、今の字幕のところに入ります"
+    : "書いて Enter で、この録音の最後に入ります";
 }
 function addNote(n, date, dirname) {
   capBox.querySelector(".captions-empty")?.remove();
@@ -1112,7 +1112,7 @@ function addNote(n, date, dirname) {
   div.className = "caption note";
   div.dataset.pos = String(n.pos);
   div.tabIndex = 0;
-  div.innerHTML = `<span class="ts">${fmtTs(n.pos)}</span><span class="note-tag">メモ</span>` +
+  div.innerHTML = `<span class="note-tag">メモ</span>` +
     `<span class="note-text"></span><button class="note-del" aria-label="このメモを削除" title="このメモを削除">×</button>`;
   div.querySelector(".note-text").textContent = n.text;
   div.querySelector(".note-del").addEventListener("click", async (e) => {
@@ -1132,6 +1132,10 @@ function addNote(n, date, dirname) {
   else capBox.appendChild(div);
   return div;
 }
+// Enter that confirms Japanese conversion must not send the half-written line (Safari)
+$("note-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.isComposing || e.keyCode === 229)) e.preventDefault();
+});
 $("note-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const t = noteTarget();
