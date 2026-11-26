@@ -51,12 +51,14 @@ function syncRecordingState(s) {
     if (state.paused) { clearInterval(state.timerId); state.pausedAt = Date.now(); }
     setRecorderUI(state.paused ? "paused" : "recording");
     $("rec-title").textContent = `[${s.session.meta.id}] ${s.session.meta.title}`;
+    updateNoteForm();
   } else if (!s.recording && state.recording) {
     state.recording = false;
     state.paused = false;
     clearInterval(state.timerId);
     setRecorderUI("idle");
     $("rec-title").textContent = stoppedTitle();
+    updateNoteForm();
   }
 }
 function setChip(id, text, ok) {
@@ -174,7 +176,15 @@ function addCaption(ts, text, translating) {
     p.textContent = "翻訳中…";
     div.appendChild(p);
   }
-  box.appendChild(div);
+  // a sentence is finished after it is spoken: notes written meanwhile go after it
+  let after = null;
+  for (let el = box.lastElementChild; el; el = el.previousElementSibling) {
+    if (el.classList.contains("partial")) continue;
+    if (!el.classList.contains("note") || !(+el.dataset.pos > ts)) break;
+    after = el;
+  }
+  if (after) after.before(div);
+  else box.appendChild(div);
   scrollToLatest();
 }
 
@@ -338,14 +348,16 @@ function showCard(card) {
   openCard = card;
   const copy = card.cloneNode(true);
   copy.className = `caption-large${card.classList.contains("photo") ? " photo" : ""}`;
+  copy.querySelector(".note-del")?.remove();
   const btn = copy.querySelector(".photo-btn");
   if (btn) btn.replaceWith(btn.querySelector("img"));
   for (const x of copy.querySelectorAll("details")) x.open = true;
   const parts = [copy];
   if (btn) { // a slide makes sense next to what was being said
     const all = cards(), i = all.indexOf(card);
-    const before = all.slice(0, i).reverse().find((c) => !c.classList.contains("photo"));
-    const after = all.slice(i + 1).find((c) => !c.classList.contains("photo"));
+    const spoken = (c) => !c.classList.contains("photo") && !c.classList.contains("note");
+    const before = all.slice(0, i).reverse().find(spoken);
+    const after = all.slice(i + 1).find(spoken);
     for (const c of [before, after]) if (c) {
       const near = c.cloneNode(true);
       near.className = "caption-large near";
@@ -454,6 +466,7 @@ function clearScreen() {
   $("chat-target").textContent = "";
   scrollToLatest(true);
   markSelected();
+  updateNoteForm();
 }
 
 $("btn-record").addEventListener("click", async () => {
@@ -548,6 +561,7 @@ async function doStart(payload) {
   state.currentMeta = data.meta;
   $("rec-title").textContent = label;
   $("chat-target").textContent = label;
+  updateNoteForm();
   loadSessions().then(() => jumpTo(dayBox.querySelector(".agenda-row.live")
     || dayBox.querySelector(`.rec-row[data-dirname="${CSS.escape(data.dirname)}"]`), 60));
   refreshStatus();
@@ -579,6 +593,7 @@ async function stopRecording() {
   clearInterval(state.timerId);
   setRecorderUI("idle");
   $("rec-title").textContent = stoppedTitle();
+  updateNoteForm();
   const note = document.createElement("div");
   note.className = "captions-empty";
   note.textContent = "停止しました。高精度文字起こしをバックグラウンドで実行中 — 完了すると一覧に HQ✓ が付きます";
@@ -1061,21 +1076,90 @@ async function openSession(date, dirname) {
   state.viewing = true;
   showTarget();
   $("rec-title").textContent = `[${d.meta.id}] ${d.meta.title}(保存済み)`;
-  if (d.segments.length || d.photos.length) $("captions").replaceChildren();
+  updateNoteForm();
+  if (d.segments.length || d.photos.length || d.notes.length) $("captions").replaceChildren();
   else setPlaceholder("captions", "この録音の文字起こしはありません");
   const shots = d.photos.slice();
+  const notes = d.notes.slice();
   for (const s of d.segments) {
     while (shots.length && shots[0].pos < s.ts) addPhoto(shots.shift(), date, dirname);
+    while (notes.length && notes[0].pos < s.ts) addNote(notes.shift(), date, dirname);
     addCaption(s.ts, s.text);
     if (s.ja) addJapanese(s.ts, s.ja);
   }
   for (const p of shots) addPhoto(p, date, dirname);
+  for (const n of notes) addNote(n, date, dirname);
   if (d.photos.length) photoBar(d, date, dirname);
   if (d.summary) addSummary(d.summary, "保存済みの要約");
   else clearSummary("この録音の要約はありません");
   $("captions").scrollTop = 0;
   showLatestBtn();
 }
+
+/* ---------- notes: one line at a time, placed where the talk is ---------- */
+// The captions on screen belong to the saved recording being viewed, else to the live one
+function noteTarget() { return state.viewing ? state.selected : state.current; }
+function updateNoteForm() {
+  const t = noteTarget();
+  $("note-input").disabled = $("btn-note").disabled = !t;
+  $("note-input").placeholder = !t ? "録音中か、録音を開いている時に書けます"
+    : state.recording && !state.viewing ? "気づいたことを書いて Enter(字幕の今の位置に入ります)"
+    : "この録音にメモを追加(最後に入ります)";
+}
+function addNote(n, date, dirname) {
+  capBox.querySelector(".captions-empty")?.remove();
+  const div = document.createElement("div");
+  div.className = "caption note";
+  div.dataset.pos = String(n.pos);
+  div.tabIndex = 0;
+  div.innerHTML = `<span class="ts">${fmtTs(n.pos)}</span><span class="note-tag">メモ</span>` +
+    `<span class="note-text"></span><button class="note-del" aria-label="このメモを削除" title="このメモを削除">×</button>`;
+  div.querySelector(".note-text").textContent = n.text;
+  div.querySelector(".note-del").addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const r = await fetch(`/api/sessions/${date}/${encodeURIComponent(dirname)}/notes/${n.id}`, { method: "DELETE" });
+    if (!r.ok && r.status !== 404) { $("note-status").textContent = "削除できませんでした"; return; }
+    div.remove();
+    // an undo: the text comes back to the box instead of being lost
+    if (!$("note-input").value && !$("note-input").disabled) {
+      $("note-input").value = n.text;
+      $("note-status").textContent = "削除しました。文は入力欄に戻してあります";
+    } else $("note-status").textContent = "削除しました";
+  });
+  // above the line still being heard, which keeps updating at the bottom
+  const partial = capBox.querySelector(".caption.partial");
+  if (partial) partial.before(div);
+  else capBox.appendChild(div);
+  return div;
+}
+$("note-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const t = noteTarget();
+  const text = $("note-input").value.trim();
+  if (!t || !text || state.noteBusy) return;
+  state.noteBusy = true;
+  const view = state.viewId;
+  try {
+    const r = await fetch(`/api/sessions/${t.date}/${encodeURIComponent(t.dirname)}/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const x = await r.json().catch(() => ({}));
+    if (!r.ok) { $("note-status").textContent = x.error || "保存できませんでした"; return; }
+    $("note-input").value = "";
+    $("note-status").textContent = "";
+    if (view !== state.viewId) return; // the screen moved on; it is saved anyway
+    const el = addNote(x, t.date, t.dirname);
+    if (state.viewing) el.scrollIntoView({ block: "nearest" });
+    else scrollToLatest(true);
+  } catch {
+    $("note-status").textContent = "サーバに接続できませんでした。文は入力欄に残っています";
+  } finally {
+    state.noteBusy = false;
+  }
+});
+updateNoteForm();
 
 /* ---------- memo ---------- */
 let memoTarget = null;

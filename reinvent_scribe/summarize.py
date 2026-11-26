@@ -130,7 +130,7 @@ def build_daily_report(sessions: list[Session], llm, slides=lambda s: "") -> str
             summary = _chat_with_retry(llm, prompt)
         parts.append(summary or "(要約を生成できませんでした)")
 
-    memos = [f"- [{s.meta['id']}] {s.meta['memo']}" for s in sessions if s.meta.get("memo")]
+    memos = [f"- [{s.meta['id']}] {t}" for s in sessions for t in s.impressions()]
     if memos:
         parts += ["", "## 所感・特筆事項", *memos]
     return "\n".join(parts)
@@ -164,7 +164,7 @@ def build_slack_post(sessions: list[Session], llm, report_md: str,
         lines = ["【参加セッション】"]
         lines += [f"・{_time(s)} [{s.meta['id']}] {s.meta['title']}"
                   for s in sessions]
-        memos = [f"・[{s.meta['id']}] {s.meta['memo']}" for s in sessions if s.meta.get("memo")]
+        memos = [f"・[{s.meta['id']}] {t}" for s in sessions for t in s.impressions()]
         if memos:
             lines += ["", "【所感】", *memos]
         body = "\n".join(lines)

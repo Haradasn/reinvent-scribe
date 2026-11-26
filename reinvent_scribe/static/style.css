@@ -351,6 +351,27 @@ a.memo-btn { color: var(--accent2); opacity: 0.9; text-decoration: none; font-si
 .web-head { color: var(--accent2); font-size: 0.75rem; margin-bottom: 4px; }
 .web-btn { margin-top: 8px; font-size: 0.78rem; }
 
+/* ---- notes: the listener's own lines in the timeline ---- */
+.note-form { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.note-label { font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+.note-form input {
+  flex: 1; min-width: 0; padding: 11px 16px; border-radius: 12px;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.05);
+  color: var(--text); font-size: 0.9rem; outline: none;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+.note-form input:focus { border-color: #ffd166; box-shadow: 0 0 0 3px rgba(255,209,102,0.2); }
+.note-form input:disabled, .note-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+.note-status { flex: 1 1 100%; min-height: 1.2em; font-size: 0.78rem; color: var(--muted); }
+.note-status:empty { display: none; }
+.caption.note { background: rgba(255,209,102,0.08); border-color: rgba(255,209,102,0.45); display: flex; gap: 8px; align-items: flex-start; }
+.caption.note .note-text { flex: 1; white-space: pre-wrap; overflow-wrap: anywhere; }
+.caption.note .note-tag { color: #ffd166; font-size: 0.78rem; font-weight: 700; white-space: nowrap; padding-top: 2px; }
+.note-del { min-width: 32px; min-height: 32px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; font-size: 1rem; }
+.note-del:hover { color: var(--text); border-color: var(--border); }
+.note-del:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+.focus-modal .note-form input { font-size: 1.1rem; }
+
 /* ---- photos ---- */
 .photo-btn { border: 0; background: none; padding: 0; cursor: zoom-in; display: block; margin-top: 6px; }
 .photo-btn img { max-width: 100%; max-height: 260px; border-radius: 10px; display: block; }
