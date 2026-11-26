@@ -130,10 +130,18 @@ def build_daily_report(sessions: list[Session], llm, slides=lambda s: "") -> str
             summary = _chat_with_retry(llm, prompt)
         parts.append(summary or "(要約を生成できませんでした)")
 
-    memos = [f"- [{s.meta['id']}] {t}" for s in sessions for t in s.impressions()]
+    memos = [x for s in sessions for x in _memo_block(s, "- ")]
     if memos:
         parts += ["", "## 所感・特筆事項", *memos]
     return "\n".join(parts)
+
+
+def _memo_block(s: Session, bullet: str) -> list[str]:
+    """A multi-line notepad stays under its session's bullet."""
+    lines = s.memo_lines()
+    if not lines:
+        return []
+    return [f"{bullet}[{s.meta['id']}] {lines[0]}"] + [f"  {x}" for x in lines[1:]]
 
 
 def _to_slack_text(text: str) -> str:
@@ -164,7 +172,7 @@ def build_slack_post(sessions: list[Session], llm, report_md: str,
         lines = ["【参加セッション】"]
         lines += [f"・{_time(s)} [{s.meta['id']}] {s.meta['title']}"
                   for s in sessions]
-        memos = [f"・[{s.meta['id']}] {t}" for s in sessions for t in s.impressions()]
+        memos = [x for s in sessions for x in _memo_block(s, "・")]
         if memos:
             lines += ["", "【所感】", *memos]
         body = "\n".join(lines)
