@@ -81,6 +81,13 @@
     <div class="panel-foot">
       <button id="btn-latest" class="latest-btn hidden">↓ 最新の字幕へ</button>
     </div>
+    <form id="note-form" class="note-form">
+      <label for="note-input" class="note-label">メモ</label>
+      <input id="note-input" type="text" maxlength="2000" autocomplete="off" disabled
+        placeholder="録音中か、録音を開いている時に書けます" aria-describedby="note-status">
+      <button type="submit" class="send-btn" id="btn-note" disabled>追加</button>
+      <span id="note-status" class="note-status" role="status"></span>
+    </form>
   </section>
 
   <!-- Right: summary over chat -->
