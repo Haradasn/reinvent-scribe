@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import queue
 import re
@@ -713,10 +714,53 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
         (day_dir / "daily_slack.txt").write_text(slack, encoding="utf-8")
         return {"markdown": md, "slack": slack}
 
+    def _report_state(date: str, sessions: list) -> dict:
+        day_dir = settings.data_dir / date
+        md = day_dir / "daily_summary.md"
+        made = (datetime.fromtimestamp(md.stat().st_mtime).isoformat(timespec="seconds")
+                if md.exists() else None)
+        sent = None
+        try:
+            sent = json.loads((day_dir / "daily_sent.json").read_text(encoding="utf-8"))["sent_at"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        last = max((s.meta.get("ended_at") or s.meta["started_at"] for s in sessions), default="")
+        return {"date": date, "recordings": len(sessions), "made_at": made, "sent_at": sent,
+                # a recording finished after the report was made is not in it
+                "stale": bool(made and last[:19] > made)}
+
+    @app.get("/api/daily-reports")
+    def report_days():
+        days: dict[str, list] = {}
+        for s in store.all():
+            days.setdefault(s.meta.get("schedule_date") or s.dir.parent.name, []).append(s)
+        return [_report_state(d, ss) for d, ss in sorted(days.items())]
+
+    @app.get("/api/daily-report")
+    def saved_report(date: str):
+        _check_date(date)
+        day_dir = settings.data_dir / date
+        try:
+            md = (day_dir / "daily_summary.md").read_text(encoding="utf-8")
+        except OSError:
+            return JSONResponse({"error": "まだ作成していません"}, status_code=404)
+        try:
+            slack = (day_dir / "daily_slack.txt").read_text(encoding="utf-8")
+        except OSError:
+            slack = ""
+        return {"markdown": md, "slack": slack,
+                **_report_state(date, store.list_for_date(date))}
+
     @app.post("/api/daily-report/send")
     def send_report(date: str, body: MailBody):
         _check_date(date)
-        return _send_mail(body, store.list_for_date(date))
+        out = _send_mail(body, store.list_for_date(date))
+        if isinstance(out, dict) and out.get("ok"):
+            day_dir = settings.data_dir / date
+            day_dir.mkdir(parents=True, exist_ok=True)
+            (day_dir / "daily_sent.json").write_text(json.dumps(
+                {"sent_at": datetime.now().isoformat(timespec="seconds")}), encoding="utf-8")
+        return out
 
     @app.post("/api/sessions/{date}/{dirname}/send-summary")
     def send_summary(date: str, dirname: str, body: MailBody):

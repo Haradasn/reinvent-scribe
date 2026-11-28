@@ -1227,20 +1227,80 @@ function reportState(message = "") {
   if (done) showReport();
 }
 
-$("btn-report").addEventListener("click", () => {
-  const date = $("list-date").value || today();
-  // reopening the same day keeps what was made
-  if (report.date !== date && !report.busy) report.slack = report.md = "";
+const md2 = (iso) => iso && `${+iso.slice(5, 7)}/${+iso.slice(8, 10)} ${iso.slice(11, 16)}`;
+const dayStatus = (d) => d.sent_at ? "送信済み" : d.made_at ? "作成済み" : "未作成";
+
+// Days with recordings, each with whether its report was made / sent
+async function loadReportDays() {
+  try {
+    const r = await fetch("/api/daily-reports");
+    report.days = r.ok ? await r.json() : [];
+  } catch { report.days = report.days || []; }
+  renderReportDays();
+}
+
+function renderReportDays() {
+  const box = $("report-days");
+  box.replaceChildren(...(report.days || []).map((d) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "report-day";
+    b.dataset.status = d.sent_at ? "sent" : d.made_at ? "made" : "none";
+    b.setAttribute("aria-pressed", String(d.date === report.date));
+    b.disabled = !!report.busy;
+    b.innerHTML = `<b>${dayLabel(d.date)}</b><span>${dayStatus(d)}</span>`;
+    b.title = `録音${d.recordings}件`;
+    b.onclick = () => selectReportDay(d.date);
+    return b;
+  }));
+  if (!report.days?.length) box.textContent = "録音がまだありません";
+}
+
+function reportNote() {
+  const d = (report.days || []).find((x) => x.date === report.date);
+  if (!d || !d.made_at) return d ? "この日の日報はまだ作っていません" : "";
+  return `${md2(d.made_at)} に作成` + (d.sent_at ? `・${md2(d.sent_at)} に Gmail で送信` : "") +
+    (d.stale ? "。その後に録音が増えています。作り直すと反映されます" : "");
+}
+
+// Show the saved report of that day (no LLM call); making one is a separate button
+async function selectReportDay(date) {
+  if (report.busy) return;
+  report.date = date;
+  report.slack = report.md = "";
   $("report-title").textContent = `出張日報 ${date.replaceAll("-", "/")}`;
-  if (!report.busy) reportState();
+  renderReportDays();
+  reportState("");
+  try {
+    const r = await fetch(`/api/daily-report?date=${date}`);
+    if (r.ok && report.date === date) {
+      const d = await r.json();
+      report.md = d.markdown;
+      report.slack = d.slack;
+      loadMailPhotos(date);
+    }
+  } catch {}
+  if (report.date === date) reportState(reportNote());
+}
+
+$("btn-report").addEventListener("click", async () => {
   $("report-modal").showModal();
+  if (report.busy) return;
+  await loadReportDays();
+  const days = (report.days || []).map((d) => d.date);
+  // today if it has recordings, else the latest day that does
+  const pick = [sched.today, today()].find((d) => days.includes(d)) || days.at(-1);
+  if (pick) selectReportDay(pick);
+  else { report.date = null; reportState("録音がまだありません"); $("btn-regen").disabled = true; }
 });
 $("btn-regen").addEventListener("click", async () => {
   const mention = $("f-mention").value.trim();
   try { localStorage.setItem("mention", mention); } catch {}
-  const date = $("list-date").value || today();
+  const date = report.date;
+  if (!date) return;
   const b = $("btn-regen");
   report.busy = true;
+  renderReportDays();
   b.disabled = true;
   b.textContent = "作成中…";
   for (const id of ["btn-copy", "btn-mail"]) $(id).disabled = true;
@@ -1256,14 +1316,14 @@ $("btn-regen").addEventListener("click", async () => {
     const data = await r.json();
     report.slack = data.slack;
     report.md = data.markdown;
-    report.date = date;
     loadMailPhotos(date);
   } catch {
     message = report.md ? "作り直せませんでした。前の内容を表示しています" : "作成できませんでした。もう一度お試しください";
   }
   report.busy = false;
   $("mail-note").textContent = "";
-  reportState(message);
+  await loadReportDays();
+  reportState(message || reportNote());
 });
 $("btn-copy").addEventListener("click", async () => {
   try {
@@ -1295,6 +1355,7 @@ $("btn-mail").addEventListener("click", async () => {
     });
     const d = await r.json();
     note.textContent = r.ok ? `送信しました ✓${d.attachments ? `(添付 ${d.attachments}件)` : ""}` : d.error || "送信に失敗しました";
+    if (r.ok) { await loadReportDays(); $("report-status").textContent = reportNote(); }
   } catch {
     note.textContent = "送信できたか確認できません。Gmail の送信済みを確認してください";
   }
