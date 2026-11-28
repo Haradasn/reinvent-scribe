@@ -550,6 +550,18 @@ def create_app(settings: Settings | None = None, mic_factory=MicStream,
             finally:
                 state["hq_pending"].remove(rec.session.dir.name)
                 broadcast({"type": "hq_done", "dirname": rec.session.dir.name})
+            # the rolling summary drops early topics over a long talk: redo it
+            # from the whole (HQ) transcript; offline keeps the rolling one
+            try:
+                if report_llm.available():
+                    whole = summarize_whole(rec.session, report_llm,
+                                            photos.slide_text(rec.session))
+                    if whole and rec.session.dir.exists():
+                        (rec.session.dir / "summary.md").write_text(whole, encoding="utf-8")
+                        broadcast({"type": "summary", "final": True, "text": whole,
+                                   "dirname": rec.session.dir.name})
+            except Exception:
+                log.exception("whole summary failed")
 
         threading.Thread(target=_hq, daemon=True).start()
         return {"dirname": rec.session.dir.name}
