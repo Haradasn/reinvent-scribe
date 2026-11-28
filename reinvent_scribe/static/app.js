@@ -118,6 +118,11 @@ function connectWS() {
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === "level") return onLevel(msg);
+    if (msg.final) {  // whole-talk summary after stop: show it where that recording is on screen
+      const shown = state.viewing ? state.selected : state.current;
+      if (shown?.dirname === msg.dirname) addSummary(msg.text, "全体の要約(停止後に作り直し)");
+      return;
+    }
     if (state.viewing && ["segment", "partial", "jp", "jp_failed", "summary"].includes(msg.type)) return;
     if (msg.type.startsWith("jp") && msg.dirname !== state.current?.dirname) return;
     if (msg.type === "jp_failed") { const p = pendingJp(msg.ts); if (p) p.textContent = "訳せませんでした(英語は保存済み)"; }
