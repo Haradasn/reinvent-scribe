@@ -414,6 +414,15 @@ a.memo-btn { color: var(--accent2); opacity: 0.9; text-decoration: none; font-si
 .focus-modal .photo-btn img { max-height: 56vh; }
 
 /* ---- daily report: make, check, then send ---- */
+.report-days { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; color: var(--muted); font-size: 0.82rem; }
+.report-day { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 76px; min-height: 44px;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: inherit; cursor: pointer; }
+.report-day b { color: var(--text); font-size: 0.85rem; }
+.report-day span { font-size: 0.72rem; }
+.report-day[data-status="none"] span { color: #fbbf24; font-weight: 600; }
+.report-day[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.report-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.report-day:disabled { opacity: 0.55; cursor: default; }
 .report-make { display: flex; align-items: flex-end; gap: 12px; margin-top: 12px; }
 .modal .report-make label { flex: 1; margin: 0; }
 .report-make button { min-height: 44px; white-space: nowrap; }
